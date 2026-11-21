@@ -1,9 +1,17 @@
 # AdSkip 智能跳广告助手
 
-版本：**1.2.3**（稳定性与安全修复）
+版本：**1.2.4**（自动化安全与批量保存修复）
 包名：`com.aeginning.adskip`
 技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
 最低系统：Android 8.0（API 26）
+
+## 1.2.4 自动化安全与批量保存修复
+
+- 对“Don't skip / 不可跳过”等明确否定语句增加拒绝匹配，避免被“Skip Ad”子串误判为跳过按钮，并增加回归测试。
+- 应用规则保存改为单个 SQLite 事务，失败时回滚，避免逐条写入产生部分保存和不必要的 UI 卡顿。
+- DNS 黑名单只有在二次确认后才真正清空；无效规则不会覆盖当前名单。
+- OCR 点击需要二次截图确认相同文字和近似位置；每个阶段重新检查 OCR 开关、前台应用和安全条件。
+- 修复 API 30 截图能力在 API 26 最低版本下的 Lint 标注，并回收无障碍节点和截图 Bitmap。
 
 ## 1.2.3 稳定性与安全修复
 
@@ -80,7 +88,7 @@
 
 - 新增兼容性报告：Android 版本/API、设备型号、OCR 截图 API 能力、无障碍状态、DNS VPN 状态、Shizuku 状态、Java 堆内存快照、已启用 App 数和本地统计。
 - GitHub Actions 使用 JDK 17 和 Gradle 8.11.1，执行 JUnit、Android Lint、Debug APK 构建，并分别上传 APK 和测试报告。
-- CI Artifact：`AdSkip-1.2.3-debug-apk` 和 `AdSkip-1.2.3-reports`。
+- CI Artifact：`AdSkip-1.2.4-debug-apk` 和 `AdSkip-1.2.4-reports`。
 
 ## 2. 工程结构
 
@@ -130,7 +138,7 @@ gradle :app:assembleDebug
 
 APK 输出：`app/build/outputs/apk/debug/app-debug.apk`。这是 Debug 测试包，不是 Release 上架签名包；项目未包含正式签名密钥。
 
-也可以把整个项目目录上传到 GitHub，在 **Actions → Android CI** 运行工作流，完成后下载 `AdSkip-1.2.3-debug-apk` Artifact。单元测试和 Lint 报告在 `AdSkip-1.2.3-reports`。
+也可以把整个项目目录上传到 GitHub，在 **Actions → Android CI** 运行工作流，完成后下载 `AdSkip-1.2.4-debug-apk` Artifact。单元测试和 Lint 报告在 `AdSkip-1.2.4-reports`。
 
 ## 4. 首次使用
 
