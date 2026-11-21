@@ -594,6 +594,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
     }
 
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
     private boolean isActiveWindowSafeForTarget(String expectedPackage, long generation) {
         if (destroyed || generation != windowGeneration) return false;
         AccessibilityNodeInfo root = getRootInActiveWindow();
