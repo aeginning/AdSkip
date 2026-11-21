@@ -117,7 +117,7 @@ public final class MainActivity extends Activity {
         addGap(brandText, 2);
         brandText.addView(subtitle);
 
-        TextView version = label("VERSION 1.2.2", 10, 0xFF245BDB, true);
+        TextView version = label("VERSION " + getAppVersionName(), 10, 0xFF245BDB, true);
         version.setLetterSpacing(0.06f);
         version.setGravity(Gravity.CENTER);
         version.setPadding(dp(10), dp(7), dp(10), dp(7));
@@ -910,6 +910,22 @@ public final class MainActivity extends Activity {
     private void addGap(LinearLayout parent, int dp) {
         View gap = new View(this);
         parent.addView(gap, new LinearLayout.LayoutParams(-1, dp(dp)));
+    }
+
+    private String getAppVersionName() {
+        try {
+            android.content.pm.PackageInfo info;
+            if (Build.VERSION.SDK_INT >= 33) {
+                info = getPackageManager().getPackageInfo(getPackageName(),
+                        android.content.pm.PackageManager.PackageInfoFlags.of(0L));
+            } else {
+                info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            }
+            return info.versionName == null || info.versionName.trim().isEmpty()
+                    ? "unknown" : info.versionName;
+        } catch (android.content.pm.PackageManager.NameNotFoundException ignored) {
+            return "unknown";
+        }
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
