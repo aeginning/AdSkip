@@ -347,14 +347,21 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, new TakeScreenshotCallback() {
                 @Override public void onSuccess(ScreenshotResult result) {
-                    Bitmap bitmap = copyScreenshotBitmap(result);
-                    if (bitmap == null) {
+                    Bitmap bitmap = null;
+                    try {
+                        bitmap = copyScreenshotBitmap(result);
+                        if (bitmap == null) {
+                            ocrInFlight = false;
+                            return;
+                        }
+                        Bitmap bounded = resizeForOcr(bitmap);
+                        if (bounded != bitmap && !bitmap.isRecycled()) bitmap.recycle();
+                        runRecognizers(bounded, expectedPackage, generation);
+                        bitmap = null; // Ownership transferred to runRecognizers().
+                    } catch (Throwable failure) {
+                        if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
                         ocrInFlight = false;
-                        return;
                     }
-                    Bitmap bounded = resizeForOcr(bitmap);
-                    if (bounded != bitmap && !bitmap.isRecycled()) bitmap.recycle();
-                    runRecognizers(bounded, expectedPackage, generation);
                 }
 
                 @Override public void onFailure(int errorCode) {
@@ -429,7 +436,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void executeOcrCandidate(OcrCandidate candidate, String context, int bitmapWidth, int bitmapHeight,
                                      String expectedPackage, long generation) {
-        if (!isActiveWindowSafeForTarget(expectedPackage, generation)
+        if (!isOcrEnabled() || !isActiveWindowSafeForTarget(expectedPackage, generation)
                 || database == null || !database.isAppEnabled(expectedPackage)
                 || database.isLabelSuppressed(expectedPackage, candidate.label)) return;
         long now = SystemClock.elapsedRealtime();
@@ -458,13 +465,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (result == null) return null;
         HardwareBuffer hardwareBuffer = result.getHardwareBuffer();
         if (hardwareBuffer == null) return null;
+        Bitmap hardwareBitmap = null;
         try {
             ColorSpace colorSpace = result.getColorSpace();
-            Bitmap hardwareBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace);
+            hardwareBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace);
             return hardwareBitmap == null ? null : hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false);
         } catch (Throwable ignored) {
             return null;
         } finally {
+            if (hardwareBitmap != null && !hardwareBitmap.isRecycled()) hardwareBitmap.recycle();
             hardwareBuffer.close();
         }
     }
@@ -474,7 +483,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (ocrInFlight) return;
         ocrInFlight = true;
         mainHandler.postDelayed(() -> {
-            if (destroyed || !isActiveWindowSafeForTarget(expectedPackage, generation)
+            if (destroyed || !isOcrEnabled() || !isActiveWindowSafeForTarget(expectedPackage, generation)
                     || database == null || !database.isAppEnabled(expectedPackage)
                     || database.isLabelSuppressed(expectedPackage, expectedLabel)
                     || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
@@ -484,15 +493,22 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             try {
                 takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, new TakeScreenshotCallback() {
                     @Override public void onSuccess(ScreenshotResult result) {
-                        Bitmap bitmap = copyScreenshotBitmap(result);
-                        if (bitmap == null) {
+                        Bitmap bitmap = null;
+                        try {
+                            bitmap = copyScreenshotBitmap(result);
+                            if (bitmap == null) {
+                                ocrInFlight = false;
+                                return;
+                            }
+                            Bitmap bounded = resizeForOcr(bitmap);
+                            if (bounded != bitmap && !bitmap.isRecycled()) bitmap.recycle();
+                            runOcrConfirmation(bounded, expectedLabel, firstBounds, expectedPackage,
+                                    generation, firstScore);
+                            bitmap = null; // Ownership transferred to runOcrConfirmation().
+                        } catch (Throwable failure) {
+                            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
                             ocrInFlight = false;
-                            return;
                         }
-                        Bitmap bounded = resizeForOcr(bitmap);
-                        if (bounded != bitmap && !bitmap.isRecycled()) bitmap.recycle();
-                        runOcrConfirmation(bounded, expectedLabel, firstBounds, expectedPackage,
-                                generation, firstScore);
                     }
 
                     @Override public void onFailure(int errorCode) {
@@ -514,7 +530,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             Task<Text> task = recognizer.process(image);
             task.addOnCompleteListener(completed -> {
                 try {
-                    if (destroyed || !completed.isSuccessful() || completed.getResult() == null
+                    if (destroyed || !isOcrEnabled() || !completed.isSuccessful() || completed.getResult() == null
                             || !isActiveWindowSafeForTarget(expectedPackage, generation)
                             || database == null || !database.isAppEnabled(expectedPackage)
                             || database.isLabelSuppressed(expectedPackage, expectedLabel)
@@ -553,7 +569,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                                             true, true, true, line.getText(), context)) continue;
 
-                            if (generation != windowGeneration || !isActiveWindowSafeForTarget(expectedPackage, generation)
+                            if (!isOcrEnabled() || generation != windowGeneration
+                                    || !isActiveWindowSafeForTarget(expectedPackage, generation)
                                     || !database.isAppEnabled(expectedPackage)
                                     || database.isLabelSuppressed(expectedPackage, line.getText())
                                     || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) return;
