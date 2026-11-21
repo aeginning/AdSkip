@@ -1,13 +1,23 @@
 # AdSkip 1.2.0
 
-Android intelligent ad-skip assistant. Full source package: [`AdSkip-1.2.0-source.zip`](./AdSkip-1.2.0-source.zip).
+Android intelligent ad-skip assistant.
+
+## Canonical source
+
+The maintained, buildable Android Gradle project is in [AdSkip/](./AdSkip/). Use this directory as the current source of truth. The original [AdSkip-1.2.0-source.zip](./AdSkip-1.2.0-source.zip) is retained as the initial uploaded snapshot; it is not the canonical location for subsequent fixes.
+
+To download the current source, use **Code → Download ZIP** on this repository, then open the extracted `AdSkip/` directory as an Android Gradle project.
 
 ## Build in GitHub Actions
 
-The `Android CI` workflow extracts the source archive and runs JVM unit tests, Android Lint, and `assembleDebug` with JDK 17, Gradle 8.9, and Android SDK 35. Download the `AdSkip-1.2.0-debug-apk` artifact from the successful workflow run to install the Debug APK.
+The **Android CI** workflow runs JVM unit tests, Android Lint, and `:app:assembleDebug` with JDK 17, Gradle 8.9, and Android SDK 35. Download the `AdSkip-1.2.0-debug-apk` artifact from a successful workflow run.
 
-## Local source
+## Local build
 
-Download and extract `AdSkip-1.2.0-source.zip`. Open the extracted `AdSkip/` directory as an Android Gradle project. See its `README.md` for module details, permissions, privacy notes, testing instructions, and known DNS limitations.
+Open `AdSkip/` in Android Studio and build the `app` debug variant. The project uses Java 17, minSdk 26, and targetSdk 35.
 
-**Note:** This is a Debug test build. It is not a production/release-signed APK. Android Accessibility and VPN permissions must be enabled explicitly by the device owner.
+## Permissions and limitations
+
+Android Accessibility and VPN permissions must be enabled explicitly by the device owner. DNS filtering uses Android's single VPN slot and does not filter DoH/DoT, hard-coded IPs, or all in-app advertising.
+
+**Note:** CI produces a Debug test APK, not a production/release-signed APK.
