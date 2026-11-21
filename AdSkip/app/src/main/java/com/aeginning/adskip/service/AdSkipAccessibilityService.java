@@ -10,6 +10,7 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -95,7 +96,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
         if (pkg.equals(getPackageName()) || !database.isAppEnabled(pkg)) return;
 
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         if (now - lastScanAt < EVENT_INTERVAL_MS) return;
         lastScanAt = now;
 
@@ -104,28 +105,42 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         nodeScanIncomplete = false;
         if (root == null) return;
         CharSequence rootPackage = root.getPackageName();
-        if (rootPackage == null || !pkg.contentEquals(rootPackage)) return;
+        if (rootPackage == null || !pkg.contentEquals(rootPackage)) {
+            recycleNode(root);
+            return;
+        }
 
         List<AccessibilityNodeInfo> nodes = new ArrayList<>();
-        StringBuilder screenText = new StringBuilder();
-        collectNodes(root, 0, nodes, screenText);
-        if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return; // Fail closed on sensitive or partial UI trees.
-        String context = screenText.toString();
-        Candidate candidate = chooseCandidate(nodes, context, pkg);
-
-        if (candidate != null) {
-            scheduleNodeConfirmation(candidate, pkg, windowGeneration);
-        } else {
-            boolean allowVisualProbe = true; // The 7s throttle still permits visually rendered ads with no accessibility text.
-            maybeRunOcr(pkg, TextMatcher.hasAdContext(context), allowVisualProbe, windowGeneration);
+        Candidate candidate = null;
+        String context = "";
+        try {
+            StringBuilder screenText = new StringBuilder();
+            collectNodes(root, 0, nodes, screenText);
+            if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
+            context = screenText.toString();
+            candidate = chooseCandidate(nodes, context, pkg);
+            if (candidate != null) {
+                scheduleNodeConfirmation(candidate, pkg, windowGeneration);
+            } else {
+                boolean allowVisualProbe = true;
+                maybeRunOcr(pkg, TextMatcher.hasAdContext(context), allowVisualProbe, windowGeneration);
+            }
+        } finally {
+            if (candidate != null && candidate.ownsNode) recycleNode(candidate.node);
+            recycleNodes(nodes);
         }
     }
 
     private void collectNodes(AccessibilityNodeInfo node, int depth,
                               List<AccessibilityNodeInfo> nodes, StringBuilder text) {
-        if (node == null || !node.isVisibleToUser()) return;
+        if (node == null) return;
+        if (!node.isVisibleToUser()) {
+            recycleNode(node);
+            return;
+        }
         if (depth > MAX_DEPTH || nodes.size() >= MAX_NODES) {
             nodeScanIncomplete = true;
+            recycleNode(node);
             return;
         }
         nodes.add(node);
@@ -149,30 +164,48 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
     }
 
+    @SuppressWarnings("deprecation")
+    private void recycleNode(AccessibilityNodeInfo node) {
+        if (node != null && Build.VERSION.SDK_INT < 33) node.recycle();
+    }
+
+    private void recycleNodes(List<AccessibilityNodeInfo> nodes) {
+        for (AccessibilityNodeInfo node : nodes) recycleNode(node);
+        nodes.clear();
+    }
+
     private Candidate chooseCandidate(List<AccessibilityNodeInfo> nodes, String context, String packageName) {
         Candidate best = null;
         int bestScore = 0;
-        // Load the per-app suppression phrases once per scan instead of opening a SQLite cursor for every node.
         List<String> suppressedLabels = database == null
                 ? java.util.Collections.emptyList() : database.getSuppressedLabels(packageName);
         for (AccessibilityNodeInfo node : nodes) {
             String label = readLabel(node);
             if (isSuppressedLabel(suppressedLabels, label)) continue;
-            AccessibilityNodeInfo clickable = nearestClickable(node);
-            if (clickable == null) continue;
-            Rect bounds = new Rect();
-            clickable.getBoundsInScreen(bounds);
-            int width = getResources().getDisplayMetrics().widthPixels;
-            int height = getResources().getDisplayMetrics().heightPixels;
-            AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(label, context,
-                    clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
-                    bounds.width(), bounds.height(), width, height);
-            int score = assessment.score;
-            if (score <= bestScore || score < 75) continue;
-            if (!SafetyPolicy.isSafeTarget(bounds, width, height,
-                    clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(), label, context)) continue;
-            best = new Candidate(clickable, new Rect(bounds), label, score);
-            bestScore = score;
+            ClickableTarget target = nearestClickable(node);
+            if (target == null) continue;
+            boolean selected = false;
+            try {
+                AccessibilityNodeInfo clickable = target.node;
+                Rect bounds = new Rect();
+                clickable.getBoundsInScreen(bounds);
+                int width = getResources().getDisplayMetrics().widthPixels;
+                int height = getResources().getDisplayMetrics().heightPixels;
+                AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(label, context,
+                        clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
+                        bounds.width(), bounds.height(), width, height);
+                int score = assessment.score;
+                if (score <= bestScore || score < 75) continue;
+                if (!SafetyPolicy.isSafeTarget(bounds, width, height,
+                        clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(), label, context)) continue;
+
+                if (best != null && best.ownsNode) recycleNode(best.node);
+                best = new Candidate(clickable, target.owned, new Rect(bounds), label, score);
+                bestScore = score;
+                selected = true;
+            } finally {
+                if (!selected && target.owned) recycleNode(target.node);
+            }
         }
         return best;
     }
@@ -200,31 +233,43 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             pendingNodeSignature = null;
             if (destroyed || database == null || generation != windowGeneration || !database.isAppEnabled(packageName)) return;
             AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root == null || root.getPackageName() == null || !packageName.contentEquals(root.getPackageName())) return;
+            if (root == null) return;
+            CharSequence rootPackage = root.getPackageName();
+            if (rootPackage == null || !packageName.contentEquals(rootPackage)) {
+                recycleNode(root);
+                return;
+            }
             hasSensitiveInputInCurrentWindow = false;
             nodeScanIncomplete = false;
             List<AccessibilityNodeInfo> nodes = new ArrayList<>();
-            StringBuilder text = new StringBuilder();
-            collectNodes(root, 0, nodes, text);
-            if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
-            Candidate second = chooseCandidate(nodes, text.toString(), packageName);
-            if (second == null) return;
-            boolean sameLabel = AdConfidenceScorer.normalize(initialLabel)
-                    .equals(AdConfidenceScorer.normalize(second.label));
-            boolean sameArea = Math.abs(initialBounds.centerX() - second.bounds.centerX()) <= 48
-                    && Math.abs(initialBounds.centerY() - second.bounds.centerY()) <= 48;
-            AdConfidenceScorer.Assessment a = new AdConfidenceScorer.Assessment(
-                    initialScore, initialScore >= 90 ? AdConfidenceScorer.Level.HIGH : AdConfidenceScorer.Level.REVIEW,
-                    "首次观察");
-            AdConfidenceScorer.Assessment b = AdConfidenceScorer.assess(second.label, text.toString(),
-                    second.node.isClickable(), second.node.isEnabled(), second.node.isVisibleToUser(),
-                    second.bounds.width(), second.bounds.height(),
-                    getResources().getDisplayMetrics().widthPixels, getResources().getDisplayMetrics().heightPixels);
-            if (!sameLabel || !sameArea || !AdConfidenceScorer.canProceedAfterSecondObservation(a, b)) {
-                database.log(packageName, safeLogLabel(initialLabel), "BLOCKED", "二次识别不一致或置信度不足");
-                return;
+            Candidate second = null;
+            try {
+                StringBuilder text = new StringBuilder();
+                collectNodes(root, 0, nodes, text);
+                if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
+                second = chooseCandidate(nodes, text.toString(), packageName);
+                if (second == null) return;
+                boolean sameLabel = AdConfidenceScorer.normalize(initialLabel)
+                        .equals(AdConfidenceScorer.normalize(second.label));
+                boolean sameArea = Math.abs(initialBounds.centerX() - second.bounds.centerX()) <= 48
+                        && Math.abs(initialBounds.centerY() - second.bounds.centerY()) <= 48;
+                AdConfidenceScorer.Assessment firstAssessment = new AdConfidenceScorer.Assessment(
+                        initialScore, initialScore >= 90 ? AdConfidenceScorer.Level.HIGH : AdConfidenceScorer.Level.REVIEW,
+                        "首次观察");
+                AdConfidenceScorer.Assessment secondAssessment = AdConfidenceScorer.assess(second.label, text.toString(),
+                        second.node.isClickable(), second.node.isEnabled(), second.node.isVisibleToUser(),
+                        second.bounds.width(), second.bounds.height(),
+                        getResources().getDisplayMetrics().widthPixels, getResources().getDisplayMetrics().heightPixels);
+                if (!sameLabel || !sameArea
+                        || !AdConfidenceScorer.canProceedAfterSecondObservation(firstAssessment, secondAssessment)) {
+                    database.log(packageName, safeLogLabel(initialLabel), "BLOCKED", "二次识别不一致或置信度不足");
+                    return;
+                }
+                executeNodeCandidate(second, packageName, text.toString());
+            } finally {
+                if (second != null && second.ownsNode) recycleNode(second.node);
+                recycleNodes(nodes);
             }
-            executeNodeCandidate(second, packageName, text.toString());
         };
         mainHandler.postDelayed(pendingNodeConfirmation, CLICK_CONFIRM_DELAY_MS);
     }
@@ -235,12 +280,17 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         pendingNodeSignature = null;
     }
 
-    private AccessibilityNodeInfo nearestClickable(AccessibilityNodeInfo node) {
+    private ClickableTarget nearestClickable(AccessibilityNodeInfo node) {
         AccessibilityNodeInfo current = node;
+        boolean owned = false;
         for (int i = 0; current != null && i < 5; i++) {
-            if (current.isClickable() && current.isEnabled()) return current;
-            current = current.getParent();
+            if (current.isClickable() && current.isEnabled()) return new ClickableTarget(current, owned);
+            AccessibilityNodeInfo parent = current.getParent();
+            if (owned) recycleNode(current);
+            current = parent;
+            owned = true;
         }
+        if (owned) recycleNode(current);
         return null;
     }
 
@@ -256,14 +306,17 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 if (parent.getText() != null) builder.append(parent.getText()).append(' ');
                 if (parent.getContentDescription() != null) builder.append(parent.getContentDescription()).append(' ');
             }
-            parent = parent.getParent();
+            AccessibilityNodeInfo next = parent.getParent();
+            recycleNode(parent);
+            parent = next;
         }
+        if (parent != null) recycleNode(parent);
         String result = builder.toString().trim();
         return result.length() > 120 ? result.substring(0, 120) : result;
     }
 
     private void executeNodeCandidate(Candidate candidate, String packageName, String context) {
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         if (now - lastClickAt < CLICK_COOLDOWN_MS) return;
         if (!SafetyPolicy.isSafeTarget(candidate.bounds,
                 getResources().getDisplayMetrics().widthPixels,
@@ -286,7 +339,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe, long generation) {
         if (Build.VERSION.SDK_INT < 30 || ocrInFlight || hasSensitiveInputInCurrentWindow || !isOcrEnabled()) return;
         if (!adContext && !allowVisualProbe) return;
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         long interval = adContext ? OCR_AD_INTERVAL_MS : OCR_VISUAL_PROBE_INTERVAL_MS;
         if (now - lastOcrAt < interval) return;
         lastOcrAt = now;
@@ -385,13 +438,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void executeOcrCandidate(OcrCandidate candidate, String context, int bitmapWidth, int bitmapHeight,
                                      String expectedPackage, long generation) {
-        AccessibilityNodeInfo currentRoot = getRootInActiveWindow();
-        if (currentRoot == null || currentRoot.getPackageName() == null
-                || !expectedPackage.contentEquals(currentRoot.getPackageName())
-                || generation != windowGeneration || containsSensitiveInput(currentRoot)
+        if (!isActiveWindowSafeForTarget(expectedPackage, generation)
                 || database == null || !database.isAppEnabled(expectedPackage)
                 || database.isLabelSuppressed(expectedPackage, candidate.label)) return;
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         if (now - lastClickAt < CLICK_COOLDOWN_MS) return;
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
@@ -412,18 +462,30 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         // OCR is coordinate based: wait briefly and verify the same window is still active.
         mainHandler.postDelayed(() -> {
             if (destroyed) return;
-            AccessibilityNodeInfo latest = getRootInActiveWindow();
-            if (generation != windowGeneration || latest == null || latest.getPackageName() == null
-                    || !expectedPackage.contentEquals(latest.getPackageName()) || containsSensitiveInput(latest)
+            if (!isActiveWindowSafeForTarget(expectedPackage, generation)
                     || database == null || !database.isAppEnabled(expectedPackage)
                     || database.isLabelSuppressed(expectedPackage, candidate.label)
-                    || System.currentTimeMillis() - lastClickAt < CLICK_COOLDOWN_MS) return;
+                    || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) return;
             if (dispatchTap(mapped.centerX(), mapped.centerY())) {
-                lastClickAt = System.currentTimeMillis();
+                lastClickAt = SystemClock.elapsedRealtime();
                 database.log(expectedPackage, safeLogLabel(candidate.label), "CLICK",
                         "本地 OCR 二次窗口核验通过；置信度=" + assessment.score);
             }
         }, CLICK_CONFIRM_DELAY_MS);
+    }
+
+    private boolean isActiveWindowSafeForTarget(String expectedPackage, long generation) {
+        if (destroyed || generation != windowGeneration) return false;
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return false;
+        try {
+            CharSequence packageName = root.getPackageName();
+            return generation == windowGeneration && packageName != null
+                    && expectedPackage.contentEquals(packageName)
+                    && !containsSensitiveInput(root);
+        } finally {
+            recycleNode(root);
+        }
     }
 
     private boolean containsSensitiveInput(AccessibilityNodeInfo root) {
@@ -432,10 +494,18 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private boolean containsSensitiveInput(AccessibilityNodeInfo node, int depth, int[] visited) {
         if (node == null) return false;
-        if (depth > MAX_DEPTH || ++visited[0] > MAX_NODES) return true; // Fail closed on incomplete scan.
+        if (depth > MAX_DEPTH || ++visited[0] > MAX_NODES) return true;
         if (node.isVisibleToUser() && (node.isPassword() || node.isEditable())) return true;
         for (int i = 0; i < node.getChildCount(); i++) {
-            if (containsSensitiveInput(node.getChild(i), depth + 1, visited)) return true;
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child == null) continue;
+            boolean sensitive;
+            try {
+                sensitive = containsSensitiveInput(child, depth + 1, visited);
+            } finally {
+                recycleNode(child);
+            }
+            if (sensitive) return true;
         }
         return false;
     }
@@ -476,11 +546,25 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private static final class Candidate {
         final AccessibilityNodeInfo node;
+        final boolean ownsNode;
         final Rect bounds;
         final String label;
         final int score;
-        Candidate(AccessibilityNodeInfo node, Rect bounds, String label, int score) {
-            this.node = node; this.bounds = bounds; this.label = label; this.score = score;
+        Candidate(AccessibilityNodeInfo node, boolean ownsNode, Rect bounds, String label, int score) {
+            this.node = node;
+            this.ownsNode = ownsNode;
+            this.bounds = bounds;
+            this.label = label;
+            this.score = score;
+        }
+    }
+
+    private static final class ClickableTarget {
+        final AccessibilityNodeInfo node;
+        final boolean owned;
+        ClickableTarget(AccessibilityNodeInfo node, boolean owned) {
+            this.node = node;
+            this.owned = owned;
         }
     }
 
