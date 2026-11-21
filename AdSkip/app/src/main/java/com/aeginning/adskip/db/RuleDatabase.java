@@ -18,8 +18,69 @@ import com.aeginning.adskip.engine.TextMatcher;
 /** Local-only rule database. No screen text or network traffic is uploaded. */
 public final class RuleDatabase extends SQLiteOpenHelper {
     private static final String DB_NAME = "adskip_rules.db";
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 3;
     private static final long DOMAIN_CACHE_TTL_MS = 2_000L;
+
+    /**
+     * Conservative starter rules compiled from common ad-provider and tracker hostnames
+     * represented by maintained Android/DNS blocklists. This is deliberately a small,
+     * editable starter set, not a full third-party list subscription.
+     */
+    private static final String[] DEFAULT_BLOCKED_DOMAINS = {
+            // Google advertising and measurement endpoints
+            "doubleclick.net",
+            "googleadservices.com",
+            "googlesyndication.com",
+            "adservice.google.com",
+            "app-measurement.com",
+
+            // Microsoft, Amazon, Yahoo and TikTok advertising endpoints
+            "ads.msn.com",
+            "amazon-adsystem.com",
+            "ads.yahoo.com",
+            "ads.tiktok.com",
+            "analytics.tiktok.com",
+
+            // Meta ad measurement endpoints (not facebook.com or instagram.com)
+            "an.facebook.com",
+            "pixel.facebook.com",
+
+            // Tencent, Baidu and Alibaba advertising / measurement endpoints
+            "e.qq.com",
+            "gdt.qq.com",
+            "pgdt.gtimg.cn",
+            "cpro.baidu.com",
+            "pos.baidu.com",
+            "mobads.baidu.com",
+            "hm.baidu.com",
+            "tanx.com",
+            "mmstat.com",
+
+            // Common global advertising exchanges and analytics providers
+            "adnxs.com",
+            "criteo.com",
+            "taboola.com",
+            "outbrain.com",
+            "rubiconproject.com",
+            "pubmatic.com",
+            "openx.net",
+            "smartadserver.com",
+            "adform.net",
+            "moatads.com",
+            "quantserve.com",
+            "scorecardresearch.com",
+
+            // Common mobile advertising and attribution SDK providers
+            "applovin.com",
+            "ironsrc.com",
+            "vungle.com",
+            "chartboost.com",
+            "tapjoy.com",
+            "adcolony.com",
+            "inmobi.com",
+            "adjust.com"
+    };
+
     private Set<String> blockedDomainCache;
     private long blockedDomainCacheAt;
 
@@ -32,12 +93,26 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX idx_action_logs_created ON action_logs(created_at DESC)");
         db.execSQL("CREATE TABLE suppressed_labels (package_name TEXT NOT NULL, phrase TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(package_name, phrase))");
         db.execSQL("CREATE INDEX idx_suppressed_labels_package ON suppressed_labels(package_name)");
+        insertDefaultDomainRules(db);
     }
 
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         if (oldVersion < 2) {
             db.execSQL("CREATE TABLE IF NOT EXISTS suppressed_labels (package_name TEXT NOT NULL, phrase TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(package_name, phrase))");
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_suppressed_labels_package ON suppressed_labels(package_name)");
+        }
+        if (oldVersion < 3) {
+            // Append missing defaults without deleting or replacing user-defined rules.
+            insertDefaultDomainRules(db);
+        }
+    }
+
+    private static void insertDefaultDomainRules(SQLiteDatabase db) {
+        for (String domain : DEFAULT_BLOCKED_DOMAINS) {
+            ContentValues values = new ContentValues();
+            values.put("domain", domain);
+            values.put("enabled", 1);
+            db.insertWithOnConflict("domain_rules", null, values, SQLiteDatabase.CONFLICT_IGNORE);
         }
     }
 

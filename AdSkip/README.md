@@ -1,9 +1,15 @@
 # AdSkip 智能跳广告助手
 
-版本：**1.2.0**（安全与识别增强版）
+版本：**1.2.1**（DNS 默认规则与应用批量选择）
 包名：`com.aeginning.adskip`
-技术：Java 17 / Android SDK 35 / Gradle 8.9 / Android Gradle Plugin 8.7.3 / Shizuku API 13.1.5
+技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
 最低系统：Android 8.0（API 26）
+
+## 1.2.1 更新
+
+- DNS 黑名单新增一组可编辑的默认广告投放、广告联盟和追踪域名，包含 Google、Microsoft、Amazon、TikTok、腾讯、百度、阿里及常见移动广告 SDK / 广告交易平台。数据库从版本 2 增量升级到版本 3；升级时只补充缺失规则，不删除或覆盖用户已有域名规则。
+- 应用选择对话框顶部新增“全选当前列表”；支持一次全选、取消全选，也会在逐项勾选时同步顶部状态。范围仅限当前列出的桌面启动器应用。
+- 无障碍服务状态通过系统启用组件列表精确比对，回到主界面时刷新授权状态。
 
 ## 1. 1.2.0 更新内容
 
@@ -58,8 +64,8 @@
 ### 设备诊断和 CI
 
 - 新增兼容性报告：Android 版本/API、设备型号、OCR 截图 API 能力、无障碍状态、DNS VPN 状态、Shizuku 状态、Java 堆内存快照、已启用 App 数和本地统计。
-- GitHub Actions 使用 JDK 17 和 Gradle 8.9，执行 JUnit、Android Lint、Debug APK 构建，并分别上传 APK 和测试报告。
-- CI Artifact：`AdSkip-1.2.0-debug-apk` 和 `AdSkip-1.2.0-reports`。
+- GitHub Actions 使用 JDK 17 和 Gradle 8.11.1，执行 JUnit、Android Lint、Debug APK 构建，并分别上传 APK 和测试报告。
+- CI Artifact：`AdSkip-1.2.1-debug-apk` 和 `AdSkip-1.2.1-reports`。
 
 ## 2. 工程结构
 

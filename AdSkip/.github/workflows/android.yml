@@ -1,5 +1,5 @@
 name: Android CI
-run-name: AdSkip 1.2.0 · ${{ github.event_name }}
+run-name: AdSkip 1.2.1 · ${{ github.event_name }}
 
 permissions:
   contents: read
@@ -27,7 +27,7 @@ jobs:
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.11.1'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -36,7 +36,7 @@ jobs:
         run: yes | sdkmanager --licenses >/dev/null 2>&1 || true
 
       - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
       - name: Run JVM unit tests
         run: gradle --no-daemon :app:testDebugUnitTest
@@ -50,7 +50,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AdSkip-1.2.0-debug-apk
+          name: AdSkip-1.2.1-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
@@ -59,7 +59,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AdSkip-1.2.0-reports
+          name: AdSkip-1.2.1-reports
           path: |
             app/build/reports/tests/testDebugUnitTest/**
             app/build/test-results/testDebugUnitTest/**

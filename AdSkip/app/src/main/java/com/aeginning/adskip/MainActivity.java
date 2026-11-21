@@ -371,16 +371,27 @@ public final class MainActivity extends Activity {
 
     private boolean isAccessibilityServiceEnabled() {
         try {
-            int enabled = Settings.Secure.getInt(getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, 0);
+            int enabled = Settings.Secure.getInt(getContentResolver(),
+                    Settings.Secure.ACCESSIBILITY_ENABLED, 0);
             if (enabled != 1) return false;
-            String services = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            if (services == null) return false;
-            String full = new android.content.ComponentName(this,
-                    com.aeginning.adskip.service.AdSkipAccessibilityService.class).flattenToString();
-            String shortName = new android.content.ComponentName(this,
-                    com.aeginning.adskip.service.AdSkipAccessibilityService.class).flattenToShortString();
-            return services.contains(full) || services.contains(shortName);
-        } catch (Exception e) { return false; }
+
+            String services = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (services == null || services.isEmpty()) return false;
+
+            android.content.ComponentName expected = new android.content.ComponentName(this,
+                    com.aeginning.adskip.service.AdSkipAccessibilityService.class);
+            // Android stores a colon-separated list of flattened component names.
+            // Parse each component instead of using substring matching.
+            for (String entry : services.split(":")) {
+                android.content.ComponentName enabledComponent =
+                        android.content.ComponentName.unflattenFromString(entry.trim());
+                if (expected.equals(enabledComponent)) return true;
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void showAppRulesDialog() {
@@ -394,12 +405,20 @@ public final class MainActivity extends Activity {
             if (info.activityInfo == null || getPackageName().equals(info.activityInfo.packageName)) continue;
             if (seenPackages.add(info.activityInfo.packageName)) filtered.add(info);
         }
+
         ScrollView scroll = new ScrollView(this);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setPadding(dp(16), dp(8), dp(16), dp(8));
         Set<String> current = new HashSet<>(database.getEnabledApps());
         List<CheckBox> checks = new ArrayList<>();
+
+        CheckBox selectAll = new CheckBox(this);
+        selectAll.setText("全选当前列表（" + filtered.size() + " 个应用）");
+        selectAll.setTextSize(14);
+        selectAll.setEnabled(!filtered.isEmpty());
+        list.addView(selectAll);
+
         for (ResolveInfo info : filtered) {
             CheckBox check = new CheckBox(this);
             check.setText(getString(R.string.app_checkbox_label,
@@ -410,13 +429,48 @@ public final class MainActivity extends Activity {
             list.addView(check);
             checks.add(check);
         }
+
+        boolean initiallyAllChecked = !checks.isEmpty();
+        for (CheckBox check : checks) {
+            if (!check.isChecked()) {
+                initiallyAllChecked = false;
+                break;
+            }
+        }
+        selectAll.setChecked(initiallyAllChecked);
+
+        final boolean[] synchronizingSelection = {false};
+        selectAll.setOnCheckedChangeListener((buttonView, checked) -> {
+            if (synchronizingSelection[0]) return;
+            synchronizingSelection[0] = true;
+            for (CheckBox item : checks) item.setChecked(checked);
+            synchronizingSelection[0] = false;
+        });
+        for (CheckBox check : checks) {
+            check.setOnCheckedChangeListener((buttonView, checked) -> {
+                if (synchronizingSelection[0]) return;
+                boolean allChecked = !checks.isEmpty();
+                for (CheckBox item : checks) {
+                    if (!item.isChecked()) {
+                        allChecked = false;
+                        break;
+                    }
+                }
+                synchronizingSelection[0] = true;
+                selectAll.setChecked(allChecked);
+                synchronizingSelection[0] = false;
+            });
+        }
+
         scroll.addView(list);
         new AlertDialog.Builder(this).setTitle("选择启用自动跳广告的应用")
-                .setMessage("仅列出桌面启动器应用。建议先选择 1–2 个应用测试。")
+                .setMessage("仅列出桌面启动器应用。可使用顶部“全选当前列表”，建议先选择少量应用测试。")
                 .setView(scroll)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存", (dialog, which) -> {
-                    for (CheckBox check : checks) database.setAppEnabled((String) check.getTag(), check.isChecked());
+                    for (CheckBox check : checks) {
+                        database.setAppEnabled((String) check.getTag(), check.isChecked());
+                    }
                     refreshStatus();
                 }).show();
     }
@@ -430,7 +484,7 @@ public final class MainActivity extends Activity {
         input.setHint("每行一个域名，例如：\nad.example.com\ntracker.example.net");
         input.setText(String.join("\n", database.getBlockedDomains()));
         new AlertDialog.Builder(this).setTitle("DNS 域名黑名单")
-                .setMessage("输入域名，不要填写 URL。规则会匹配该域名及其子域名。误屏蔽可能导致 App 功能异常。")
+                .setMessage("已预置常见广告投放、广告联盟及部分追踪域名，涵盖 Google、Microsoft、Amazon、TikTok、腾讯、百度、阿里和常见广告网络。可按需删除或增补。规则会匹配该域名及其子域名；误屏蔽可能导致 App 广告、统计或部分功能异常。")
                 .setView(input)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存", (dialog, which) -> {
@@ -464,7 +518,7 @@ public final class MainActivity extends Activity {
     private void showDnsDisclosure() {
         if (database.getBlockedDomains().isEmpty()) {
             new AlertDialog.Builder(this).setTitle("尚未设置 DNS 规则")
-                    .setMessage("请先添加你确认属于广告或跟踪用途的域名。首版没有预置黑名单，避免误屏蔽正常服务。")
+                    .setMessage("当前 DNS 黑名单为空。首次安装或升级时会提供一组可编辑的常见广告域名默认规则；如果你已清空规则，请先在“管理 DNS 域名规则”中添加确认需要拦截的域名。")
                     .setNegativeButton("取消", null)
                     .setPositiveButton("管理规则", (dialog, which) -> showDomainRulesDialog())
                     .show();
