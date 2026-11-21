@@ -72,7 +72,7 @@ jobs:
 
           # Replace user-visible literals and concatenation with resources.
           replacements = [
-              ('title.setText("AdSkip");', 'title.setText(R.string.main_title);'),
+              ('title.setText("AdSkip");', 'TextView title = label(R.string.main_title, 30, 0xFF172033, true);'),
               ('ocrSwitch.setText("启用屏幕 OCR 辅助识别");', 'ocrSwitch.setText(R.string.ocr_switch_label);'),
               ('serviceStatus.setText((enabled ? "无障碍服务：已启用" : "无障碍服务：未启用（点击上方按钮开启）")\n                + "\\nDNS 过滤：" + (dns ? "运行中" : "未运行"));',
                'serviceStatus.setText(getString(R.string.service_status,\n                getString(enabled ? R.string.accessibility_enabled : R.string.accessibility_disabled),\n                getString(dns ? R.string.dns_running : R.string.dns_stopped)));'),
