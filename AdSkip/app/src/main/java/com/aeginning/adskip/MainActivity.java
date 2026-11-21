@@ -414,7 +414,7 @@ public final class MainActivity extends Activity {
         List<CheckBox> checks = new ArrayList<>();
 
         CheckBox selectAll = new CheckBox(this);
-        selectAll.setText("全选当前列表（" + filtered.size() + " 个应用）");
+        selectAll.setText(getString(R.string.select_all_apps, filtered.size()));
         selectAll.setTextSize(14);
         selectAll.setEnabled(!filtered.isEmpty());
         list.addView(selectAll);
