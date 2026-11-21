@@ -15,7 +15,7 @@ final class DnsResponseCache {
     synchronized byte[] get(byte[] query, long nowElapsedRealtime) {
         String key = DnsPacketCodec.cacheKey(query);
         if (key == null) return null;
-        CacheCacheEntry entry = entries.get(key);
+        CacheEntry entry = entries.get(key);
         if (entry == null) return null;
         if (entry.expiresAt <= nowElapsedRealtime) {
             entries.remove(key);
