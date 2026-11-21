@@ -338,9 +338,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
     }
 
-    @android.annotation.TargetApi(Build.VERSION_CODES.R)
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe, long generation) {
-        if (Build.VERSION.SDK_INT < 30 || ocrInFlight || hasSensitiveInputInCurrentWindow || !isOcrEnabled()) return;
+        if (ocrInFlight || hasSensitiveInputInCurrentWindow || !isOcrEnabled()) return;
         if (!adContext && !allowVisualProbe) return;
         long now = SystemClock.elapsedRealtime();
         long interval = adContext ? OCR_AD_INTERVAL_MS : OCR_VISUAL_PROBE_INTERVAL_MS;
@@ -464,7 +464,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         confirmOcrCandidate(candidate.label, mapped, expectedPackage, generation, assessment.score);
     }
 
-    @android.annotation.TargetApi(Build.VERSION_CODES.R)
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private Bitmap copyScreenshotBitmap(ScreenshotResult result) {
         if (result == null) return null;
         HardwareBuffer hardwareBuffer = result.getHardwareBuffer();
@@ -482,7 +482,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
     }
 
-    @android.annotation.TargetApi(Build.VERSION_CODES.R)
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void confirmOcrCandidate(String expectedLabel, Rect firstBounds,
                                      String expectedPackage, long generation, int firstScore) {
         if (ocrInFlight) return;
@@ -526,7 +526,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }, CLICK_CONFIRM_DELAY_MS);
     }
 
-    @android.annotation.TargetApi(Build.VERSION_CODES.R)
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void runOcrConfirmation(Bitmap bitmap, String expectedLabel, Rect firstBounds,
                                     String expectedPackage, long generation, int firstScore) {
         try {
