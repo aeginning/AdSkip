@@ -67,8 +67,12 @@ public final class MainActivity extends Activity {
 
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
-        // Target SDK 35 is edge-to-edge on Android 15+: keep content clear of system bars/cutouts.
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+
+        // Respect status/navigation bars and display cutouts on modern Android versions.
         if (Build.VERSION.SDK_INT >= 30) {
             scroll.setOnApplyWindowInsetsListener((view, insets) -> {
                 android.graphics.Insets safe = insets.getInsets(
@@ -83,132 +87,237 @@ public final class MainActivity extends Activity {
                 return insets.consumeSystemWindowInsets();
             });
         }
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(24), dp(20), dp(28));
-        root.setBackgroundColor(0xFFF5F7FA);
-        scroll.addView(root);
+        root.setPadding(dp(18), dp(18), dp(18), dp(32));
+        root.setBackgroundColor(0xFFF4F6FB);
+        scroll.addView(root, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
 
-        TextView title = new TextView(this);
-        title.setText(R.string.main_title);
-        title.setTextSize(30);
-        title.setTextColor(0xFF172033);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
-        root.addView(title);
+        // Brand header.
+        LinearLayout brand = new LinearLayout(this);
+        brand.setOrientation(LinearLayout.HORIZONTAL);
+        brand.setGravity(Gravity.CENTER_VERTICAL);
+        root.addView(brand, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText("智能跳广告助手 · 本地识别 · 安全点击");
-        subtitle.setTextSize(14);
-        subtitle.setTextColor(0xFF667085);
-        addGap(root, 4);
-        root.addView(subtitle);
+        android.widget.ImageView appIcon = new android.widget.ImageView(this);
+        appIcon.setImageResource(R.drawable.ic_adskip);
+        brand.addView(appIcon, new LinearLayout.LayoutParams(dp(52), dp(52)));
 
-        addGap(root, 22);
+        LinearLayout brandText = new LinearLayout(this);
+        brandText.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams brandTextParams = new LinearLayout.LayoutParams(0, -2, 1f);
+        brandTextParams.leftMargin = dp(12);
+        brand.addView(brandText, brandTextParams);
+
+        TextView title = label(R.string.main_title, 30, 0xFF172033, true);
+        brandText.addView(title);
+        TextView subtitle = label("智能跳广告助手 · 本地识别 · 安全点击", 13, 0xFF667085, false);
+        addGap(brandText, 2);
+        brandText.addView(subtitle);
+
+        TextView version = label("VERSION 1.2.2", 10, 0xFF245BDB, true);
+        version.setLetterSpacing(0.06f);
+        version.setGravity(Gravity.CENTER);
+        version.setPadding(dp(10), dp(7), dp(10), dp(7));
+        version.setBackground(roundedDrawable(0xFFEAF0FF, 0, 18));
+        brand.addView(version, new LinearLayout.LayoutParams(-2, -2));
+
+        addGap(root, 20);
+
+        // Main runtime overview.
         LinearLayout statusCard = card(root);
-        TextView statusTitle = label("运行状态", 18, 0xFF172033, true);
-        statusCard.addView(statusTitle);
-        serviceStatus = label("正在检查无障碍服务…", 14, 0xFF475467, false);
-        addGap(statusCard, 8);
-        statusCard.addView(serviceStatus);
-        addGap(root, 12);
+        LinearLayout statusHeading = new LinearLayout(this);
+        statusHeading.setOrientation(LinearLayout.HORIZONTAL);
+        statusHeading.setGravity(Gravity.CENTER_VERTICAL);
+        statusCard.addView(statusHeading, new LinearLayout.LayoutParams(-1, -2));
 
-        Button accessibility = button("开启无障碍服务", 0xFF245BDB);
-        root.addView(accessibility);
+        TextView statusTitle = label("运行概览", 19, 0xFF172033, true);
+        statusHeading.addView(statusTitle, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView localBadge = label("本机运行", 11, 0xFF16804A, true);
+        localBadge.setGravity(Gravity.CENTER);
+        localBadge.setPadding(dp(9), dp(5), dp(9), dp(5));
+        localBadge.setBackground(roundedDrawable(0xFFE9F7EF, 0, 16));
+        statusHeading.addView(localBadge);
+
+        serviceStatus = label("正在检查服务状态…", 14, 0xFF344054, false);
+        serviceStatus.setLineSpacing(dp(4), 1.0f);
+        serviceStatus.setPadding(dp(14), dp(12), dp(14), dp(12));
+        serviceStatus.setBackground(roundedDrawable(0xFFF3F6FC, 0xFFE5EAF3, 13));
+        addGap(statusCard, 12);
+        statusCard.addView(serviceStatus);
+
+        addGap(statusCard, 14);
+        Button accessibility = button("开启 / 管理无障碍服务", 0xFF245BDB);
+        statusCard.addView(accessibility, new LinearLayout.LayoutParams(-1, dp(52)));
         accessibility.setOnClickListener(v -> showAccessibilityDisclosure());
 
-        addGap(root, 12);
+        TextView statusHint = label("无障碍负责识别明确的跳过按钮；DNS 过滤需要单独启动并获得 VPN 授权。", 12, 0xFF7A8495, false);
+        addGap(statusCard, 9);
+        statusCard.addView(statusHint);
+
+        addGap(root, 14);
+
+        // App automation and false-positive controls.
         LinearLayout appCard = card(root);
-        appCard.addView(label("应用规则", 18, 0xFF172033, true));
-        appRuleStatus = label("尚未选择应用。默认不对任何第三方 App 自动点击。", 13, 0xFF667085, false);
-        addGap(appCard, 6);
+        appCard.addView(label("应用自动化", 18, 0xFF172033, true));
+        TextView appHint = label("仅对你明确勾选的桌面应用启用识别与安全点击。默认不对其他应用自动操作。", 12, 0xFF7A8495, false);
+        addGap(appCard, 5);
+        appCard.addView(appHint);
+        appRuleStatus = label("尚未选择应用。默认不对任何第三方 App 自动点击。", 13, 0xFF475467, false);
+        appRuleStatus.setLineSpacing(dp(3), 1.0f);
+        addGap(appCard, 11);
         appCard.addView(appRuleStatus);
-        addGap(root, 8);
-        Button chooseApps = button("选择需要自动跳过广告的 App", 0xFF344054);
-        root.addView(chooseApps);
+
+        addGap(appCard, 12);
+        Button chooseApps = button("选择需要自动跳过广告的 App", 0xFF245BDB);
+        appCard.addView(chooseApps, new LinearLayout.LayoutParams(-1, dp(50)));
         chooseApps.setOnClickListener(v -> showAppRulesDialog());
-        addGap(root, 8);
-        Button falsePositiveRules = button("管理误判屏蔽规则", 0xFF475467);
-        root.addView(falsePositiveRules);
+
+        addGap(appCard, 8);
+        Button falsePositiveRules = button("管理误判屏蔽规则", 0xFFF0F3F8);
+        falsePositiveRules.setTextColor(0xFF344054);
+        appCard.addView(falsePositiveRules, new LinearLayout.LayoutParams(-1, dp(48)));
         falsePositiveRules.setOnClickListener(v -> showRuleLearningDialog());
 
         addGap(root, 14);
+
+        // Local activity and diagnostics.
         LinearLayout statsCard = card(root);
         statsCard.addView(label("本地运行统计", 18, 0xFF172033, true));
-        statsStatus = label("正在统计近 24 小时数据…", 13, 0xFF667085, false);
-        addGap(statsCard, 6);
+        TextView statsHint = label("自动识别与 DNS 过滤的近 24 小时记录", 12, 0xFF7A8495, false);
+        addGap(statsCard, 4);
+        statsCard.addView(statsHint);
+        statsStatus = label("正在统计近 24 小时数据…", 13, 0xFF475467, false);
+        statsStatus.setLineSpacing(dp(3), 1.0f);
+        statsStatus.setPadding(dp(12), dp(11), dp(12), dp(11));
+        statsStatus.setBackground(roundedDrawable(0xFFF6F8FC, 0xFFE9EDF4, 12));
+        addGap(statsCard, 11);
         statsCard.addView(statsStatus);
-        addGap(root, 8);
-        Button compatibility = button("设备兼容性与诊断报告", 0xFF475467);
-        root.addView(compatibility);
+
+        addGap(statsCard, 10);
+        Button compatibility = button("设备兼容性与诊断报告", 0xFFF0F3F8);
+        compatibility.setTextColor(0xFF344054);
+        statsCard.addView(compatibility, new LinearLayout.LayoutParams(-1, dp(48)));
         compatibility.setOnClickListener(v -> showCompatibilityReport());
 
         addGap(root, 14);
+
+        // Optional Shizuku / ADB diagnostics.
         LinearLayout privilegeCard = card(root);
         privilegeCard.addView(label("Shizuku / ADB 增强模式", 18, 0xFF172033, true));
         TextView privilegeHint = label(
-                "可选增强功能：只读查询已安装应用、前台 Activity、应用包元数据和 AppOps 状态。不会执行修改权限、禁用应用或任意 Shell 命令。Shizuku 断开后，普通无障碍模式继续运行。",
-                13, 0xFF667085, false);
+                "可选只读诊断：查询已安装应用、前台 Activity、应用包元数据和 AppOps。不会修改权限、禁用应用或执行任意 Shell 命令。Shizuku 断开后，普通无障碍模式继续运行。",
+                12, 0xFF7A8495, false);
+        privilegeHint.setLineSpacing(dp(3), 1.0f);
         addGap(privilegeCard, 5);
         privilegeCard.addView(privilegeHint);
-        privilegeStatus = label("正在检查 Shizuku Binder…", 13, 0xFF475467, false);
-        addGap(privilegeCard, 9);
+        privilegeStatus = label("正在检查 Shizuku Binder…", 12, 0xFF475467, false);
+        privilegeStatus.setLineSpacing(dp(3), 1.0f);
+        privilegeStatus.setPadding(dp(12), dp(11), dp(12), dp(11));
+        privilegeStatus.setBackground(roundedDrawable(0xFFF6F8FC, 0xFFE9EDF4, 12));
+        addGap(privilegeCard, 11);
         privilegeCard.addView(privilegeStatus);
-        addGap(root, 8);
+
+        addGap(privilegeCard, 10);
         Button connectPrivilege = button("连接 Shizuku / 请求授权", 0xFF245BDB);
-        root.addView(connectPrivilege);
+        privilegeCard.addView(connectPrivilege, new LinearLayout.LayoutParams(-1, dp(50)));
         connectPrivilege.setOnClickListener(v -> connectShizuku());
-        addGap(root, 8);
-        Button runDiagnostics = button("运行增强系统诊断", 0xFF344054);
-        root.addView(runDiagnostics);
+        addGap(privilegeCard, 8);
+        Button runDiagnostics = button("运行增强系统诊断", 0xFFF0F3F8);
+        runDiagnostics.setTextColor(0xFF344054);
+        privilegeCard.addView(runDiagnostics, new LinearLayout.LayoutParams(-1, dp(48)));
         runDiagnostics.setOnClickListener(v -> showPrivilegeDiagnostics());
+
         addGap(root, 14);
+
+        // OCR keeps its original preference and callback.
         LinearLayout ocrCard = card(root);
         ocrCard.addView(label("图像识别（OCR）", 18, 0xFF172033, true));
-        TextView ocrHint = label("Android 11+ 使用无障碍截图在本机识别中文和英文；不会上传截图。", 13, 0xFF667085, false);
+        TextView ocrHint = label("Android 11+ 可使用无障碍截图在本机识别中文和英文；截图不会上传。", 12, 0xFF7A8495, false);
+        ocrHint.setLineSpacing(dp(3), 1.0f);
         addGap(ocrCard, 5);
         ocrCard.addView(ocrHint);
         ocrSwitch = new android.widget.Switch(this);
         ocrSwitch.setText(R.string.ocr_switch_label);
+        ocrSwitch.setTextSize(14);
         ocrSwitch.setTextColor(0xFF344054);
-        ocrSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE).getBoolean("ocr_enabled", true));
+        ocrSwitch.setPadding(0, dp(8), 0, dp(4));
+        ocrSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("ocr_enabled", true));
         ocrSwitch.setOnCheckedChangeListener((buttonView, checked) ->
-                getSharedPreferences("adskip_settings", MODE_PRIVATE).edit().putBoolean("ocr_enabled", checked).apply());
-        addGap(ocrCard, 8);
+                getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                        .edit().putBoolean("ocr_enabled", checked).apply());
+        addGap(ocrCard, 7);
         ocrCard.addView(ocrSwitch);
 
         addGap(root, 14);
+
+        // DNS controls remain individually available.
         LinearLayout dnsCard = card(root);
         dnsCard.addView(label("DNS 广告域名过滤", 18, 0xFF172033, true));
-        domainRuleStatus = label("尚未添加过滤域名。建议先使用少量自定义规则测试。", 13, 0xFF667085, false);
+        TextView dnsHint = label("通过本地 DNS 规则拦截已知广告与追踪域名。启用时会占用 Android 单 VPN 通道。", 12, 0xFF7A8495, false);
+        dnsHint.setLineSpacing(dp(3), 1.0f);
         addGap(dnsCard, 5);
+        dnsCard.addView(dnsHint);
+        domainRuleStatus = label("尚未添加过滤域名。建议先使用少量自定义规则测试。", 13, 0xFF475467, false);
+        domainRuleStatus.setLineSpacing(dp(3), 1.0f);
+        domainRuleStatus.setPadding(dp(12), dp(11), dp(12), dp(11));
+        domainRuleStatus.setBackground(roundedDrawable(0xFFF6F8FC, 0xFFE9EDF4, 12));
+        addGap(dnsCard, 11);
         dnsCard.addView(domainRuleStatus);
-        addGap(root, 8);
-        Button domains = button("管理 DNS 域名规则", 0xFF344054);
-        root.addView(domains);
+
+        addGap(dnsCard, 10);
+        Button domains = button("管理 DNS 域名规则", 0xFFF0F3F8);
+        domains.setTextColor(0xFF344054);
+        dnsCard.addView(domains, new LinearLayout.LayoutParams(-1, dp(48)));
         domains.setOnClickListener(v -> showDomainRulesDialog());
-        addGap(root, 8);
-        Button startVpn = button("启动 DNS 过滤 VPN", 0xFF16794B);
-        root.addView(startVpn);
+
+        addGap(dnsCard, 8);
+        LinearLayout dnsActions = new LinearLayout(this);
+        dnsActions.setOrientation(LinearLayout.HORIZONTAL);
+        dnsActions.setGravity(Gravity.CENTER_VERTICAL);
+        dnsCard.addView(dnsActions, new LinearLayout.LayoutParams(-1, dp(50)));
+        Button startVpn = button("启动 DNS 过滤", 0xFF16804A);
+        dnsActions.addView(startVpn, new LinearLayout.LayoutParams(0, -1, 1f));
         startVpn.setOnClickListener(v -> showDnsDisclosure());
-        addGap(root, 8);
-        Button stopVpn = button("停止 DNS 过滤", 0xFFB42318);
-        root.addView(stopVpn);
+        View dnsActionGap = new View(this);
+        dnsActions.addView(dnsActionGap, new LinearLayout.LayoutParams(dp(8), 1));
+        Button stopVpn = button("停止过滤", 0xFFFCEDEC);
+        stopVpn.setTextColor(0xFFB42318);
+        dnsActions.addView(stopVpn, new LinearLayout.LayoutParams(0, -1, 1f));
         stopVpn.setOnClickListener(v -> {
-            Intent stop = new Intent(this, DnsFilterVpnService.class).setAction(DnsFilterVpnService.ACTION_STOP);
+            Intent stop = new Intent(this, DnsFilterVpnService.class)
+                    .setAction(DnsFilterVpnService.ACTION_STOP);
             startService(stop);
             Toast.makeText(this, "已发送停止请求", Toast.LENGTH_SHORT).show();
         });
-        addGap(root, 8);
-        Button logs = button("查看识别与过滤日志", 0xFF344054);
-        root.addView(logs);
+
+        addGap(dnsCard, 8);
+        Button logs = button("查看识别与过滤日志", 0xFFF0F3F8);
+        logs.setTextColor(0xFF344054);
+        dnsCard.addView(logs, new LinearLayout.LayoutParams(-1, dp(48)));
         logs.setOnClickListener(v -> showLogs());
 
-        addGap(root, 18);
-        TextView safety = label("安全策略：只识别明确的“跳过 / Skip / 关闭广告”控件。购买、下载、安装、授权、支付、订阅、登录、同意等操作会被拦截；不确定时不点击。", 13, 0xFF475467, false);
-        root.addView(safety);
-        addGap(root, 12);
-        TextView limitation = label("说明：DNS 模块过滤发往本地虚拟 DNS 的 IPv4/IPv6 UDP/53，并对上游返回 TC=1 的截断响应尝试 TCP 重试；尚不代理客户端主动发起的 TCP/53 DNS 会话，也无法过滤 DoH/DoT、硬编码 IP 或所有应用内广告。启动 VPN 会占用 Android 单 VPN 通道。", 12, 0xFF667085, false);
-        root.addView(limitation);
+        addGap(root, 14);
+
+        // Safety and network limitations are kept visible, but separated from controls.
+        LinearLayout safetyCard = card(root);
+        safetyCard.addView(label("安全与隐私说明", 16, 0xFF172033, true));
+        TextView safety = label(
+                "安全策略：只识别明确的“跳过 / Skip / 关闭广告”控件。购买、下载、安装、授权、支付、订阅、登录、同意等操作会被拦截；不确定时不点击。",
+                12, 0xFF475467, false);
+        safety.setLineSpacing(dp(3), 1.0f);
+        addGap(safetyCard, 7);
+        safetyCard.addView(safety);
+
+        TextView limitation = label(
+                "DNS 边界：仅过滤进入本地虚拟 DNS 的 IPv4/IPv6 UDP/53 查询，并对上游截断响应尝试 TCP 重试；不代理客户端主动发起的 TCP/53，不过滤 DoH/DoT、硬编码 IP 或所有应用内广告。VPN 与其他 VPN 不能同时运行。",
+                11, 0xFF7A8495, false);
+        limitation.setLineSpacing(dp(3), 1.0f);
+        addGap(safetyCard, 10);
+        safetyCard.addView(limitation);
 
         setContentView(scroll);
         refreshStatus();
@@ -699,8 +808,10 @@ public final class MainActivity extends Activity {
     private LinearLayout card(LinearLayout parent) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(16), dp(16), dp(16));
-        card.setBackgroundColor(0xFFFFFFFF);
+        card.setPadding(dp(18), dp(17), dp(18), dp(17));
+        card.setBackground(roundedDrawable(0xFFFFFFFF, 0xFFE8ECF3, 20));
+        card.setElevation(dp(1));
+        card.setClipToOutline(true);
         parent.addView(card, new LinearLayout.LayoutParams(-1, -2));
         return card;
     }
@@ -709,9 +820,31 @@ public final class MainActivity extends Activity {
         Button b = new Button(this);
         b.setText(text);
         b.setAllCaps(false);
-        b.setTextColor(0xFFFFFFFF);
-        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(color));
+        b.setTextSize(14);
+        b.setTypeface(null, android.graphics.Typeface.BOLD);
+        b.setGravity(Gravity.CENTER);
+        b.setMinHeight(dp(46));
+        b.setMinimumHeight(dp(46));
+        b.setMinWidth(0);
+        b.setPadding(dp(12), dp(8), dp(12), dp(8));
+        b.setTextColor(color == 0xFFF0F3F8 || color == 0xFFFCEDEC
+                ? 0xFF344054 : 0xFFFFFFFF);
+        b.setBackground(new android.graphics.drawable.RippleDrawable(
+                android.content.res.ColorStateList.valueOf(0x22000000),
+                roundedDrawable(color, 0, 14), null));
+        b.setStateListAnimator(null);
         return b;
+    }
+
+    private android.graphics.drawable.GradientDrawable roundedDrawable(
+            int fillColor, int strokeColor, int radiusDp) {
+        android.graphics.drawable.GradientDrawable drawable =
+                new android.graphics.drawable.GradientDrawable();
+        drawable.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        drawable.setColor(fillColor);
+        drawable.setCornerRadius(dp(radiusDp));
+        if (strokeColor != 0) drawable.setStroke(dp(1), strokeColor);
+        return drawable;
     }
 
     private TextView label(String text, int size, int color, boolean bold) {
@@ -719,13 +852,20 @@ public final class MainActivity extends Activity {
         view.setText(text);
         view.setTextSize(size);
         view.setTextColor(color);
+        view.setIncludeFontPadding(false);
+        view.setLineSpacing(dp(2), 1.0f);
         if (bold) view.setTypeface(null, android.graphics.Typeface.BOLD);
+        return view;
+    }
+
+    private TextView label(int textRes, int size, int color, boolean bold) {
+        TextView view = label(getString(textRes), size, color, bold);
         return view;
     }
 
     private void addGap(LinearLayout parent, int dp) {
         View gap = new View(this);
-        parent.addView(gap, new LinearLayout.LayoutParams(1, dp(dp)));
+        parent.addView(gap, new LinearLayout.LayoutParams(-1, dp(dp)));
     }
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
