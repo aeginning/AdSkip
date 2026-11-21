@@ -26,6 +26,7 @@ public final class AdConfidenceScorer {
         String candidate = normalize(label);
         String context = normalize(screenText);
         if (candidate.isEmpty()) return result(0, "空标签");
+        if (TextMatcher.isNegativeSkip(candidate)) return result(0, "目标明确表示不可跳过");
         if (TextMatcher.isDangerous(candidate)) return result(0, "目标包含敏感操作词");
         if (TextMatcher.isCountdown(candidate) || TextMatcher.isCountdown(context)) {
             return result(0, "页面仍处于广告倒计时");

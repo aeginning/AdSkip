@@ -33,6 +33,15 @@ public class TextMatcherTest {
         assertTrue(TextMatcher.score("Skip", true) > 0);
     }
 
+    @Test public void rejectsNegatedSkipLabels() {
+        assertTrue(TextMatcher.isNegativeSkip("Don't skip this ad"));
+        assertTrue(TextMatcher.isNegativeSkip("do not skip"));
+        assertTrue(TextMatcher.isNegativeSkip("不可跳过"));
+        assertTrue(TextMatcher.isNegativeSkip("禁止跳过"));
+        assertEquals(0, TextMatcher.score("Don't skip this ad", true));
+        assertEquals(0, TextMatcher.score("不可跳过", true));
+    }
+
     @Test public void detectsAdContext() {
         assertTrue(TextMatcher.hasAdContext("赞助内容 - 广告"));
         assertTrue(TextMatcher.hasAdContext("Sponsored"));

@@ -20,6 +20,13 @@ public class AdConfidenceScorerTest {
         assertTrue(withContext.score >= 75);
     }
 
+    @Test public void negatedSkipTextNeverGetsConfidence() {
+        assertEquals(0, AdConfidenceScorer.assess(
+                "Don't skip this ad", "Sponsored video", true, true, true, 90, 36, 1080, 2400).score);
+        assertEquals(0, AdConfidenceScorer.assess(
+                "不可跳过", "广告内容", true, true, true, 90, 36, 1080, 2400).score);
+    }
+
     @Test public void sensitiveActionIsAlwaysRejected() {
         AdConfidenceScorer.Assessment result = AdConfidenceScorer.assess(
                 "Install", "Sponsored content", true, true, true, 90, 34, 1080, 2400);
