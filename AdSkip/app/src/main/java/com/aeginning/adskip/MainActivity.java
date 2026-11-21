@@ -320,6 +320,14 @@ public final class MainActivity extends Activity {
         safetyCard.addView(limitation);
 
         setContentView(scroll);
+        // Light navigation-bar icons require API 27. Keep API 26 readable with a dark bar.
+        if (Build.VERSION.SDK_INT >= 27) {
+            View decor = getWindow().getDecorView();
+            decor.setSystemUiVisibility(
+                    decor.getSystemUiVisibility() | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        } else {
+            getWindow().setNavigationBarColor(0xFF172033);
+        }
         refreshStatus();
     }
 
