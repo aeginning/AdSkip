@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AdSkip 智能跳广告助手</string>
+    <string name="main_title">AdSkip</string>
+    <string name="accessibility_description">识别用户已启用应用中的明确跳过广告按钮；点击前执行安全检查。</string>
+    <string name="ocr_switch_label">启用屏幕 OCR 辅助识别</string>
+    <string name="accessibility_enabled">已启用</string>
+    <string name="accessibility_disabled">未启用（点击上方按钮开启）</string>
+    <string name="dns_running">运行中</string>
+    <string name="dns_stopped">未运行</string>
+    <string name="service_status">无障碍服务：%1$s
+DNS 过滤：%2$s</string>
+    <string name="app_checkbox_label">%1$s
+%2$s</string>
+</resources>
