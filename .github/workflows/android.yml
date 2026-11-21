@@ -155,8 +155,12 @@ jobs:
           # Correctly mark the screenshot capability as API 30+, while retaining API 26+ support.
           xml = root / "res/xml/ad_accessibility_service.xml"
           x = xml.read_text(encoding="utf-8")
-          x = x.replace('<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"',
-                        '<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools" tools:targetApi="r"')
+          x = re.sub(r'\\s+xmlns:tools="http://schemas.android.com/tools"\\s+tools:targetApi="r"', "", x)
+          needle = '<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android">'
+          if needle in x:
+              x = x.replace(needle, '<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"\\n    xmlns:tools="http://schemas.android.com/tools" tools:targetApi="r"', 1)
+          elif 'tools:targetApi="r"' not in x:
+              raise SystemExit("Accessibility targetApi annotation could not be applied")
           xml.write_text(x, encoding="utf-8")
 
           # The active VPN role is the documented systemExempted eligibility path.
