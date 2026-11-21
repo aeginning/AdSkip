@@ -347,16 +347,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, new TakeScreenshotCallback() {
                 @Override public void onSuccess(ScreenshotResult result) {
-                    Bitmap bitmap = null;
-                    HardwareBuffer hardwareBuffer = result.getHardwareBuffer();
-                    try {
-                        ColorSpace colorSpace = result.getColorSpace();
-                        Bitmap hardwareBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace);
-                        if (hardwareBitmap != null) bitmap = hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false);
-                    } catch (Throwable ignored) {
-                    } finally {
-                        if (hardwareBuffer != null) hardwareBuffer.close();
-                    }
+                    Bitmap bitmap = copyScreenshotBitmap(result);
                     if (bitmap == null) {
                         ocrInFlight = false;
                         return;
@@ -459,19 +450,131 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             database.log(expectedPackage, safeLogLabel(candidate.label), "BLOCKED", "OCR 置信度或安全审核未通过");
             return;
         }
-        // OCR is coordinate based: wait briefly and verify the same window is still active.
+        // Coordinate OCR actions require a second screenshot and matching text/position.
+        confirmOcrCandidate(candidate.label, mapped, expectedPackage, generation, assessment.score);
+    }
+
+    private Bitmap copyScreenshotBitmap(ScreenshotResult result) {
+        if (result == null) return null;
+        HardwareBuffer hardwareBuffer = result.getHardwareBuffer();
+        if (hardwareBuffer == null) return null;
+        try {
+            ColorSpace colorSpace = result.getColorSpace();
+            Bitmap hardwareBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace);
+            return hardwareBitmap == null ? null : hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false);
+        } catch (Throwable ignored) {
+            return null;
+        } finally {
+            hardwareBuffer.close();
+        }
+    }
+
+    private void confirmOcrCandidate(String expectedLabel, Rect firstBounds,
+                                     String expectedPackage, long generation, int firstScore) {
+        if (ocrInFlight) return;
+        ocrInFlight = true;
         mainHandler.postDelayed(() -> {
-            if (destroyed) return;
-            if (!isActiveWindowSafeForTarget(expectedPackage, generation)
+            if (destroyed || !isActiveWindowSafeForTarget(expectedPackage, generation)
                     || database == null || !database.isAppEnabled(expectedPackage)
-                    || database.isLabelSuppressed(expectedPackage, candidate.label)
-                    || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) return;
-            if (dispatchTap(mapped.centerX(), mapped.centerY())) {
-                lastClickAt = SystemClock.elapsedRealtime();
-                database.log(expectedPackage, safeLogLabel(candidate.label), "CLICK",
-                        "本地 OCR 二次窗口核验通过；置信度=" + assessment.score);
+                    || database.isLabelSuppressed(expectedPackage, expectedLabel)
+                    || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
+                ocrInFlight = false;
+                return;
+            }
+            try {
+                takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, new TakeScreenshotCallback() {
+                    @Override public void onSuccess(ScreenshotResult result) {
+                        Bitmap bitmap = copyScreenshotBitmap(result);
+                        if (bitmap == null) {
+                            ocrInFlight = false;
+                            return;
+                        }
+                        Bitmap bounded = resizeForOcr(bitmap);
+                        if (bounded != bitmap && !bitmap.isRecycled()) bitmap.recycle();
+                        runOcrConfirmation(bounded, expectedLabel, firstBounds, expectedPackage,
+                                generation, firstScore);
+                    }
+
+                    @Override public void onFailure(int errorCode) {
+                        ocrInFlight = false;
+                    }
+                });
+            } catch (Throwable ignored) {
+                ocrInFlight = false;
             }
         }, CLICK_CONFIRM_DELAY_MS);
+    }
+
+    private void runOcrConfirmation(Bitmap bitmap, String expectedLabel, Rect firstBounds,
+                                    String expectedPackage, long generation, int firstScore) {
+        try {
+            InputImage image = InputImage.fromBitmap(bitmap, 0);
+            boolean chineseLocale = java.util.Locale.getDefault().getLanguage().startsWith("zh");
+            TextRecognizer recognizer = chineseLocale ? chineseRecognizer : latinRecognizer;
+            Task<Text> task = recognizer.process(image);
+            task.addOnCompleteListener(completed -> {
+                try {
+                    if (destroyed || !completed.isSuccessful() || completed.getResult() == null
+                            || !isActiveWindowSafeForTarget(expectedPackage, generation)
+                            || database == null || !database.isAppEnabled(expectedPackage)
+                            || database.isLabelSuppressed(expectedPackage, expectedLabel)
+                            || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) return;
+
+                    Text result = completed.getResult();
+                    String context = result.getText();
+                    int screenWidth = getResources().getDisplayMetrics().widthPixels;
+                    int screenHeight = getResources().getDisplayMetrics().heightPixels;
+                    float scaleX = screenWidth / (float) Math.max(1, bitmap.getWidth());
+                    float scaleY = screenHeight / (float) Math.max(1, bitmap.getHeight());
+                    int tolerance = dp(48);
+
+                    for (Text.TextBlock block : result.getTextBlocks()) {
+                        for (Text.Line line : block.getLines()) {
+                            if (!AdConfidenceScorer.normalize(expectedLabel)
+                                    .equals(AdConfidenceScorer.normalize(line.getText()))) continue;
+                            if (database.isLabelSuppressed(expectedPackage, line.getText())) continue;
+                            Rect box = line.getBoundingBox();
+                            if (box == null) continue;
+                            Rect mapped = new Rect(
+                                    Math.round(box.left * scaleX), Math.round(box.top * scaleY),
+                                    Math.round(box.right * scaleX), Math.round(box.bottom * scaleY));
+                            boolean sameArea = Math.abs(mapped.centerX() - firstBounds.centerX()) <= tolerance
+                                    && Math.abs(mapped.centerY() - firstBounds.centerY()) <= tolerance;
+                            if (!sameArea) continue;
+
+                            AdConfidenceScorer.Assessment second = AdConfidenceScorer.assess(
+                                    line.getText(), context, true, true, true, mapped.width(), mapped.height(),
+                                    screenWidth, screenHeight);
+                            AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
+                                    firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
+                                            : AdConfidenceScorer.Level.REVIEW, "首次 OCR 观察");
+                            if (second.score < 85
+                                    || !AdConfidenceScorer.canProceedAfterSecondObservation(first, second)
+                                    || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
+                                            true, true, true, line.getText(), context)) continue;
+
+                            if (generation != windowGeneration || !isActiveWindowSafeForTarget(expectedPackage, generation)
+                                    || !database.isAppEnabled(expectedPackage)
+                                    || database.isLabelSuppressed(expectedPackage, line.getText())
+                                    || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) return;
+                            if (dispatchTap(mapped.centerX(), mapped.centerY())) {
+                                lastClickAt = SystemClock.elapsedRealtime();
+                                database.log(expectedPackage, safeLogLabel(line.getText()), "CLICK",
+                                        "OCR 二次截图确认相同文字与位置；置信度=" + second.score);
+                            }
+                            return;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                } finally {
+                    if (!bitmap.isRecycled()) bitmap.recycle();
+                    ocrInFlight = false;
+                }
+            });
+        } catch (Throwable ignored) {
+            if (!bitmap.isRecycled()) bitmap.recycle();
+            ocrInFlight = false;
+        }
     }
 
     private boolean isActiveWindowSafeForTarget(String expectedPackage, long generation) {
