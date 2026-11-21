@@ -138,6 +138,7 @@ jobs:
           """, encoding="utf-8")
 
           # Give the launcher a small, self-contained vector icon.
+          (root / "res/drawable").mkdir(parents=True, exist_ok=True)
           (root / "res/drawable/ic_adskip.xml").write_text("""<?xml version="1.0" encoding="utf-8"?>
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="48dp" android:height="48dp"
