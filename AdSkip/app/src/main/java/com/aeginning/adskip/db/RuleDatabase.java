@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 import com.aeginning.adskip.engine.TextMatcher;
@@ -162,6 +161,11 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         if (invalidCount > 0) {
             return new DomainRuleReplaceResult(false, normalizedDomains.size(), invalidCount);
         }
+        // Empty input is not an implicit deletion. The UI must call clearDomainRules()
+        // only after the user explicitly confirms that destructive action.
+        if (normalizedDomains.isEmpty()) {
+            return new DomainRuleReplaceResult(true, 0, 0);
+        }
 
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
@@ -180,6 +184,20 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             blockedDomainCacheAt = 0;
         }
         return new DomainRuleReplaceResult(true, normalizedDomains.size(), 0);
+    }
+
+    /** Clear rules only after an explicit confirmation in the UI. */
+    public synchronized void clearDomainRules() {
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            db.delete("domain_rules", null, null);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+            blockedDomainCache = null;
+            blockedDomainCacheAt = 0;
+        }
     }
 
     public static final class DomainRuleReplaceResult {

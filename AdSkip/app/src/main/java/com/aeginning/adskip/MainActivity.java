@@ -642,9 +642,8 @@ public final class MainActivity extends Activity {
                                 .setMessage("当前输入为空。确认后会删除全部 DNS 过滤规则，广告域名将不再被 DNS 模块拦截。")
                                 .setNegativeButton("继续编辑", null)
                                 .setPositiveButton("确认清空", (confirm, which) -> {
-                                    RuleDatabase.DomainRuleReplaceResult cleared =
-                                            database.replaceDomainRules(new ArrayList<>());
-                                    if (cleared.success) {
+                                    database.clearDomainRules();
+                                    {
                                         dialog.dismiss();
                                         refreshStatus();
                                         Toast.makeText(this, "DNS 黑名单已清空", Toast.LENGTH_SHORT).show();
