@@ -20,6 +20,22 @@ jobs:
       - name: Extract complete source archive
         run: unzip -q AdSkip-1.2.0-source.zip -d .
 
+      - name: Apply DNS cache Java compile fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("AdSkip/app/src/main/java/com/aeginning/adskip/service/DnsResponseCache.java")
+          s = p.read_text(encoding="utf-8")
+          old = "removeEldestEntry(Map.Entry<String, Entry> eldest)"
+          new = "removeEldestEntry(java.util.Map.Entry<String, DnsResponseCache.Entry> eldest)"
+          if old in s:
+              s = s.replace(old, new, 1)
+              p.write_text(s, encoding="utf-8")
+          elif new not in s:
+              raise SystemExit("Expected DnsResponseCache method signature was not found; refusing an unsafe patch.")
+          print("DnsResponseCache generic signature verified.")
+          PY
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
