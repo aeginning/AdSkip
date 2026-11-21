@@ -122,8 +122,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             if (candidate != null) {
                 scheduleNodeConfirmation(candidate, pkg, windowGeneration);
             } else {
-                boolean allowVisualProbe = true;
-                maybeRunOcr(pkg, TextMatcher.hasAdContext(context), allowVisualProbe, windowGeneration);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    boolean allowVisualProbe = true;
+                    maybeRunOcr(pkg, TextMatcher.hasAdContext(context), allowVisualProbe, windowGeneration);
+                }
             }
         } finally {
             if (candidate != null && candidate.ownsNode) recycleNode(candidate.node);
@@ -336,6 +338,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
     }
 
+    @android.annotation.TargetApi(Build.VERSION_CODES.R)
     private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe, long generation) {
         if (Build.VERSION.SDK_INT < 30 || ocrInFlight || hasSensitiveInputInCurrentWindow || !isOcrEnabled()) return;
         if (!adContext && !allowVisualProbe) return;
@@ -436,7 +439,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void executeOcrCandidate(OcrCandidate candidate, String context, int bitmapWidth, int bitmapHeight,
                                      String expectedPackage, long generation) {
-        if (!isOcrEnabled() || !isActiveWindowSafeForTarget(expectedPackage, generation)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !isOcrEnabled() || !isActiveWindowSafeForTarget(expectedPackage, generation)
                 || database == null || !database.isAppEnabled(expectedPackage)
                 || database.isLabelSuppressed(expectedPackage, candidate.label)) return;
         long now = SystemClock.elapsedRealtime();
@@ -461,6 +464,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         confirmOcrCandidate(candidate.label, mapped, expectedPackage, generation, assessment.score);
     }
 
+    @android.annotation.TargetApi(Build.VERSION_CODES.R)
     private Bitmap copyScreenshotBitmap(ScreenshotResult result) {
         if (result == null) return null;
         HardwareBuffer hardwareBuffer = result.getHardwareBuffer();
@@ -478,6 +482,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
     }
 
+    @android.annotation.TargetApi(Build.VERSION_CODES.R)
     private void confirmOcrCandidate(String expectedLabel, Rect firstBounds,
                                      String expectedPackage, long generation, int firstScore) {
         if (ocrInFlight) return;
@@ -521,6 +526,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }, CLICK_CONFIRM_DELAY_MS);
     }
 
+    @android.annotation.TargetApi(Build.VERSION_CODES.R)
     private void runOcrConfirmation(Bitmap bitmap, String expectedLabel, Rect firstBounds,
                                     String expectedPackage, long generation, int firstScore) {
         try {
