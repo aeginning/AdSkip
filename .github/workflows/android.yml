@@ -49,6 +49,7 @@ jobs:
           s = p.read_text(encoding="utf-8")
           for old, new in [
               ("LinkedHashMap<String, Entry>", "LinkedHashMap<String, CacheEntry>"),
+              ("new LinkedHashMap<String, Entry>", "new LinkedHashMap<String, CacheEntry>"),
               ("Map.Entry<String, Entry>", "Map.Entry<String, CacheEntry>"),
               ("Entry entry = entries.get(key)", "CacheEntry entry = entries.get(key)"),
               ("new Entry(response.clone()", "new CacheEntry(response.clone()"),
