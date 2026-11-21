@@ -407,6 +407,9 @@ public final class MainActivity extends Activity {
         }
 
         ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(true);
+
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setPadding(dp(16), dp(8), dp(16), dp(8));
@@ -463,16 +466,28 @@ public final class MainActivity extends Activity {
         }
 
         scroll.addView(list);
-        new AlertDialog.Builder(this).setTitle("选择启用自动跳广告的应用")
-                .setMessage("仅列出桌面启动器应用。可使用顶部“全选当前列表”，建议先选择少量应用测试。")
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("选择启用自动跳广告的应用")
+                .setMessage("仅列出桌面启动器应用。勾选需要启用的应用；顶部可全选或取消全选。")
                 .setView(scroll)
                 .setNegativeButton("取消", null)
-                .setPositiveButton("保存", (dialog, which) -> {
+                .setPositiveButton("保存", (ignored, which) -> {
                     for (CheckBox check : checks) {
                         database.setAppEnabled((String) check.getTag(), check.isChecked());
                     }
                     refreshStatus();
-                }).show();
+                })
+                .create();
+
+        // Keep the action buttons outside the scrolling area so they remain visible
+        // even when the device has many launcher applications or a short display.
+        dialog.setOnShowListener(ignored -> {
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            int maxListHeight = Math.min(dp(360), Math.max(dp(180), (int) (screenHeight * 0.42f)));
+            scroll.getLayoutParams().height = maxListHeight;
+            scroll.requestLayout();
+        });
+        dialog.show();
     }
 
     private void showDomainRulesDialog() {
