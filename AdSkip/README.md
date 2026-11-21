@@ -1,9 +1,13 @@
 # AdSkip 智能跳广告助手
 
-版本：**1.2.5**（Lint 与 API 声明清理）
+版本：**1.2.6**（依赖版本同步）
 包名：`com.aeginning.adskip`
 技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
 最低系统：Android 8.0（API 26）
+
+## 1.2.6 依赖版本同步
+
+- 将 AndroidX Annotation 更新到 CI Lint 当前建议的 1.11.0，消除依赖版本提醒；其余自动化安全、DNS、无障碍生命周期和批量事务修复保持不变。
 
 ## 1.2.5 Lint 与 API 声明清理
 
@@ -94,7 +98,7 @@
 
 - 新增兼容性报告：Android 版本/API、设备型号、OCR 截图 API 能力、无障碍状态、DNS VPN 状态、Shizuku 状态、Java 堆内存快照、已启用 App 数和本地统计。
 - GitHub Actions 使用 JDK 17 和 Gradle 8.11.1，执行 JUnit、Android Lint、Debug APK 构建，并分别上传 APK 和测试报告。
-- CI Artifact：`AdSkip-1.2.5-debug-apk` 和 `AdSkip-1.2.5-reports`。
+- CI Artifact：`AdSkip-1.2.6-debug-apk` 和 `AdSkip-1.2.6-reports`。
 
 ## 2. 工程结构
 
@@ -144,7 +148,7 @@ gradle :app:assembleDebug
 
 APK 输出：`app/build/outputs/apk/debug/app-debug.apk`。这是 Debug 测试包，不是 Release 上架签名包；项目未包含正式签名密钥。
 
-也可以把整个项目目录上传到 GitHub，在 **Actions → Android CI** 运行工作流，完成后下载 `AdSkip-1.2.5-debug-apk` Artifact。单元测试和 Lint 报告在 `AdSkip-1.2.5-reports`。
+也可以把整个项目目录上传到 GitHub，在 **Actions → Android CI** 运行工作流，完成后下载 `AdSkip-1.2.6-debug-apk` Artifact。单元测试和 Lint 报告在 `AdSkip-1.2.6-reports`。
 
 ## 4. 首次使用
 
