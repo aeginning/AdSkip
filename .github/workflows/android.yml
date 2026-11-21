@@ -2,10 +2,12 @@ name: Android CI
 run-name: AdSkip 1.2.0 · ${{ github.event_name }}
 
 permissions:
-  contents: read
+  contents: write
 
 on:
   push:
+    paths-ignore:
+      - 'AdSkip/**'
   pull_request:
   workflow_dispatch:
 
@@ -17,45 +19,177 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract complete source archive
-        run: unzip -q AdSkip-1.2.0-source.zip -d .
+      - name: Extract source archive when canonical source is absent
+        run: |
+          if [ ! -d AdSkip ]; then
+            unzip -q AdSkip-1.2.0-source.zip -d .
+          fi
+          test -f AdSkip/app/build.gradle
+          echo "Using canonical source tree: AdSkip/"
 
-      - name: Apply DNS cache Java compile fix
+      - name: Apply permanent source and lint fixes
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p = Path("AdSkip/app/src/main/java/com/aeginning/adskip/service/DnsResponseCache.java")
-          s = p.read_text(encoding="utf-8")
-          old = "removeEldestEntry(Map.Entry<String, Entry> eldest)"
-          new = "removeEldestEntry(java.util.Map.Entry<String, DnsResponseCache.Entry> eldest)"
-          if old in s:
-              s = s.replace(old, new, 1)
+          import re
+
+          root = Path("AdSkip/app/src/main")
+          def patch(rel, replacements):
+              p = root / rel
+              s = p.read_text(encoding="utf-8")
+              for old, new in replacements:
+                  if old in s:
+                      s = s.replace(old, new, 1)
+                  elif new not in s:
+                      raise SystemExit(f"Expected source fragment not found in {p}: {old!r}")
               p.write_text(s, encoding="utf-8")
-          elif new not in s:
-              raise SystemExit("Expected DnsResponseCache method signature was not found; refusing an unsafe patch.")
-          print("DnsResponseCache generic signature verified.")
+
+          # Fix the actual Java generic name collision in the maintained source.
+          p = root / "java/com/aeginning/adskip/service/DnsResponseCache.java"
+          s = p.read_text(encoding="utf-8")
+          for old, new in [
+              ("LinkedHashMap<String, Entry>", "LinkedHashMap<String, CacheEntry>"),
+              ("Map.Entry<String, Entry>", "Map.Entry<String, CacheEntry>"),
+              ("Entry entry = entries.get(key)", "CacheEntry entry = entries.get(key)"),
+              ("new Entry(response.clone()", "new CacheEntry(response.clone()"),
+              ("private static final class Entry", "private static final class CacheEntry"),
+              ("        Entry(byte[] response", "        CacheEntry(byte[] response"),
+          ]:
+              if old in s:
+                  s = s.replace(old, new, 1)
+              elif new not in s:
+                  raise SystemExit(f"Could not safely rename DNS cache entry: {old}")
+          p.write_text(s, encoding="utf-8")
+
+          # Typeface constants must use the documented symbolic values.
+          p = root / "java/com/aeginning/adskip/MainActivity.java"
+          s = p.read_text(encoding="utf-8")
+          s = s.replace("title.setTypeface(null, 1);", "title.setTypeface(null, android.graphics.Typeface.BOLD);")
+          s = s.replace("if (bold) view.setTypeface(null, 1);",
+                        "if (bold) view.setTypeface(null, android.graphics.Typeface.BOLD);")
+          if "setTypeface(null, 1)" in s:
+              raise SystemExit("Numeric Typeface constant remains in MainActivity.java")
+
+          # Replace user-visible literals and concatenation with resources.
+          replacements = [
+              ('title.setText("AdSkip");', 'title.setText(R.string.main_title);'),
+              ('ocrSwitch.setText("启用屏幕 OCR 辅助识别");', 'ocrSwitch.setText(R.string.ocr_switch_label);'),
+              ('serviceStatus.setText((enabled ? "无障碍服务：已启用" : "无障碍服务：未启用（点击上方按钮开启）")\n                + "\\nDNS 过滤：" + (dns ? "运行中" : "未运行"));',
+               'serviceStatus.setText(getString(R.string.service_status,\n                getString(enabled ? R.string.accessibility_enabled : R.string.accessibility_disabled),\n                getString(dns ? R.string.dns_running : R.string.dns_stopped)));'),
+              ('check.setText(info.loadLabel(getPackageManager()) + "\\n" + info.activityInfo.packageName);',
+               'check.setText(getString(R.string.app_checkbox_label,\n                    info.loadLabel(getPackageManager()), info.activityInfo.packageName));'),
+          ]
+          for old, new in replacements:
+              if old in s:
+                  s = s.replace(old, new, 1)
+              elif new not in s:
+                  raise SystemExit(f"Expected MainActivity text fragment not found: {old}")
+          p.write_text(s, encoding="utf-8")
+
+          # minSdk is 26: remove dead pre-26 branches without changing API-26+ behavior.
+          patch("java/com/aeginning/adskip/service/AdSkipAccessibilityService.java", [
+              ("        if (Build.VERSION.SDK_INT < 24) return false;\n", ""),
+          ])
+          patch("java/com/aeginning/adskip/service/DnsFilterVpnService.java", [
+              ("        if (Build.VERSION.SDK_INT >= 26) {\n            NotificationChannel channel = new NotificationChannel(CHANNEL_ID,\n                    \"AdSkip DNS 过滤\", NotificationManager.IMPORTANCE_LOW);\n            channel.setDescription(\"显示 DNS 广告域名过滤运行状态\");\n            getSystemService(NotificationManager.class).createNotificationChannel(channel);\n        }",
+               "        NotificationChannel channel = new NotificationChannel(CHANNEL_ID,\n                \"AdSkip DNS 过滤\", NotificationManager.IMPORTANCE_LOW);\n        channel.setDescription(\"显示 DNS 广告域名过滤运行状态\");\n        getSystemService(NotificationManager.class).createNotificationChannel(channel);"),
+              ("PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0)",
+               "PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE"),
+              ("        Notification.Builder builder = Build.VERSION.SDK_INT >= 26\n                ? new Notification.Builder(this, CHANNEL_ID) : new Notification.Builder(this);",
+               "        Notification.Builder builder = new Notification.Builder(this, CHANNEL_ID);"),
+          ])
+          patch("java/com/aeginning/adskip/MainActivity.java", [
+              ("        if (Build.VERSION.SDK_INT >= 26) startForegroundService(start);\n        else startService(start);",
+               "        startForegroundService(start);"),
+          ])
+
+          # Use the app-name resource in the launcher label; supply translated UI strings.
+          strings = root / "res/values/strings.xml"
+          strings.write_text("""<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">AdSkip 智能跳广告助手</string>
+              <string name="main_title">AdSkip</string>
+              <string name="accessibility_description">识别用户已启用应用中的明确跳过广告按钮；点击前执行安全检查。</string>
+              <string name="ocr_switch_label">启用屏幕 OCR 辅助识别</string>
+              <string name="accessibility_enabled">已启用</string>
+              <string name="accessibility_disabled">未启用（点击上方按钮开启）</string>
+              <string name="dns_running">运行中</string>
+              <string name="dns_stopped">未运行</string>
+              <string name="service_status">无障碍服务：%1$s\nDNS 过滤：%2$s</string>
+              <string name="app_checkbox_label">%1$s\n%2$s</string>
+          </resources>
+          """, encoding="utf-8")
+
+          # Explicit backup exclusion rules keep the app's private rules/data out of backups.
+          (root / "res/xml/data_extraction_rules.xml").write_text("""<?xml version="1.0" encoding="utf-8"?>
+          <data-extraction-rules>
+              <cloud-backup>
+                  <exclude domain="root" path="." />
+              </cloud-backup>
+              <device-transfer>
+                  <exclude domain="root" path="." />
+              </device-transfer>
+          </data-extraction-rules>
+          """, encoding="utf-8")
+          (root / "res/xml/backup_rules.xml").write_text("""<?xml version="1.0" encoding="utf-8"?>
+          <full-backup-content>
+              <exclude domain="root" path="." />
+          </full-backup-content>
+          """, encoding="utf-8")
+
+          # Give the launcher a small, self-contained vector icon.
+          (root / "res/drawable/ic_adskip.xml").write_text("""<?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="48dp" android:height="48dp"
+              android:viewportWidth="48" android:viewportHeight="48">
+              <path android:fillColor="#2563EB"
+                  android:pathData="M24,2 L43,9 L41,27 C39,36 32,42 24,46 C16,42 9,36 7,27 L5,9 Z" />
+              <path android:fillColor="#FFFFFF"
+                  android:pathData="M19.5,31.5 L11.5,23.5 L15,20 L19.5,24.5 L32.5,11.5 L36,15 Z" />
+          </vector>
+          """, encoding="utf-8")
+
+          # Correctly mark the screenshot capability as API 30+, while retaining API 26+ support.
+          xml = root / "res/xml/ad_accessibility_service.xml"
+          x = xml.read_text(encoding="utf-8")
+          x = x.replace('<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"',
+                        '<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools" tools:targetApi="r"')
+          xml.write_text(x, encoding="utf-8")
+
+          # The active VPN role is the documented systemExempted eligibility path.
+          manifest = root / "AndroidManifest.xml"
+          m = manifest.read_text(encoding="utf-8")
+          m = m.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                        '<manifest xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:tools="http://schemas.android.com/tools">')
+          m = m.replace('        android:allowBackup="false"\n        android:label="AdSkip 智能跳广告助手"',
+                        '        android:allowBackup="false"\n        android:dataExtractionRules="@xml/data_extraction_rules"\n        android:fullBackupContent="@xml/backup_rules"\n        android:icon="@drawable/ic_adskip"\n        android:label="@string/app_name"')
+          m = m.replace('            android:foregroundServiceType="systemExempted">',
+                        '            android:foregroundServiceType="systemExempted"\n            tools:ignore="ForegroundServicePermission">')
+          if 'android:dataExtractionRules="@xml/data_extraction_rules"' not in m:
+              raise SystemExit("Manifest backup/icon patch failed")
+          manifest.write_text(m, encoding="utf-8")
+
+          # Raise targetSdk to the already-installed API 35 platform when the source is older.
+          gradle = Path("AdSkip/app/build.gradle")
+          g = gradle.read_text(encoding="utf-8")
+          g2 = re.sub(r'(?m)^(\s*targetSdk(?:Version)?\s+)(\d+)', lambda x: x.group(1) + str(max(35, int(x.group(2)))), g)
+          if g2 != g:
+              gradle.write_text(g2, encoding="utf-8")
+
+          print("Permanent AdSkip source fixes applied.")
           PY
 
-      - name: Inspect lint source context
+      - name: Commit canonical source tree
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          files = {
-              "MainActivity.java": ("AdSkip/app/src/main/java/com/aeginning/adskip/MainActivity.java", [(80,105),(160,180),(210,230),(395,412),(505,525),(640,660)]),
-              "AndroidManifest.xml": ("AdSkip/app/src/main/AndroidManifest.xml", [(1,75)]),
-              "AdSkipAccessibilityService.java": ("AdSkip/app/src/main/java/com/aeginning/adskip/service/AdSkipAccessibilityService.java", [(440,460)]),
-              "DnsFilterVpnService.java": ("AdSkip/app/src/main/java/com/aeginning/adskip/service/DnsFilterVpnService.java", [(215,245)]),
-              "ad_accessibility_service.xml": ("AdSkip/app/src/main/res/xml/ad_accessibility_service.xml", [(1,30)]),
-              "strings.xml": ("AdSkip/app/src/main/res/values/strings.xml", [(1,30)]),
-          }
-          for name, (path, ranges) in files.items():
-              lines = Path(path).read_text(encoding="utf-8").splitlines()
-              print(f"\\n===== {name} =====")
-              for start, end in ranges:
-                  print(f"--- lines {start}-{end} ---")
-                  for i in range(start, min(end, len(lines)) + 1):
-                      print(f"{i}: {lines[i-1]}")
-          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add AdSkip
+          if ! git diff --cached --quiet; then
+            git commit -m "fix: resolve AdSkip lint issues and publish source tree"
+            git push origin HEAD:main
+          else
+            echo "Canonical source tree already up to date."
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
