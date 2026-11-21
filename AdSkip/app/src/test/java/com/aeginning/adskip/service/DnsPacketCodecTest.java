@@ -170,6 +170,37 @@ public class DnsPacketCodecTest {
         assertNull(DnsPacketCodec.parseQuery(packet, packet.length));
     }
 
+    @Test public void rejectsIpv4ReservedFragmentFlagAndTrailingBytes() throws Exception {
+        byte[] reserved = makeIpv4UdpPacket(makeDnsQuery("reserved.example.test"));
+        DnsPacketCodec.put16(reserved, 6, 0x8000);
+        assertNull(DnsPacketCodec.parseQuery(reserved, reserved.length));
+
+        byte[] trailing = makeIpv4UdpPacket(makeDnsQuery("trailing.example.test"));
+        byte[] padded = java.util.Arrays.copyOf(trailing, trailing.length + 1);
+        assertNull(DnsPacketCodec.parseQuery(padded, padded.length));
+    }
+
+    @Test public void rejectsUnsupportedDnsOpcode() throws Exception {
+        byte[] packet = makeIpv4UdpPacket(makeDnsQuery("update.example.test"));
+        packet[30] = 0x08; // Opcode 1 (inverse query), not a standard DNS query.
+        assertNull(DnsPacketCodec.parseQuery(packet, packet.length));
+    }
+
+    @Test public void blockedResponsesPreserveRecursionAndCheckingFlags() throws Exception {
+        byte[] query = makeDnsQuery("blocked.example.test");
+        query[2] = 0x01; // RD
+        query[3] = 0x10; // CD
+
+        byte[] nxdomain = DnsPacketCodec.blockedNxDomain(query);
+        assertNotNull(nxdomain);
+        assertEquals(0x81, nxdomain[2] & 0xFF);
+        assertEquals(0x93, nxdomain[3] & 0xFF);
+
+        byte[] servfail = DnsPacketCodec.servFail(query);
+        assertNotNull(servfail);
+        assertEquals(0x92, servfail[3] & 0xFF);
+    }
+
     @Test public void detectsTruncatedDnsUdpResponse() throws Exception {
         byte[] dns = makeDnsQuery("large.example.test");
         dns[2] = (byte) (dns[2] | 0x02);

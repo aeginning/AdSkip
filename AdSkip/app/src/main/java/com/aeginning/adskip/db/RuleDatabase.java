@@ -5,6 +5,7 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.os.SystemClock;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -14,12 +15,14 @@ import java.util.Locale;
 import java.util.Set;
 
 import com.aeginning.adskip.engine.TextMatcher;
+import com.aeginning.adskip.engine.DomainRuleValidator;
 
 /** Local-only rule database. No screen text or network traffic is uploaded. */
 public final class RuleDatabase extends SQLiteOpenHelper {
     private static final String DB_NAME = "adskip_rules.db";
     private static final int DB_VERSION = 3;
     private static final long DOMAIN_CACHE_TTL_MS = 2_000L;
+    private static final int MAX_DOMAIN_RULES = 5_000;
 
     /**
      * Conservative starter rules compiled from common ad-provider and tracker hostnames
@@ -139,14 +142,32 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         return result;
     }
 
-    public synchronized void replaceDomainRules(List<String> domains) {
+    /**
+     * Replace the DNS rule set atomically. Any invalid non-empty input aborts
+     * before the existing user rules are touched.
+     */
+    public synchronized DomainRuleReplaceResult replaceDomainRules(List<String> domains) {
+        if (domains == null) return new DomainRuleReplaceResult(false, 0, 1);
+        Set<String> normalizedDomains = new HashSet<>();
+        int invalidCount = 0;
+        for (String raw : domains) {
+            if (raw == null || raw.trim().isEmpty()) continue;
+            String domain = normalizeDomain(raw);
+            if (domain.isEmpty()) invalidCount++;
+            else normalizedDomains.add(domain);
+            if (normalizedDomains.size() > MAX_DOMAIN_RULES) {
+                return new DomainRuleReplaceResult(false, normalizedDomains.size(), invalidCount + 1);
+            }
+        }
+        if (invalidCount > 0) {
+            return new DomainRuleReplaceResult(false, normalizedDomains.size(), invalidCount);
+        }
+
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
         try {
             db.delete("domain_rules", null, null);
-            for (String raw : domains) {
-                String domain = normalizeDomain(raw);
-                if (domain.isEmpty()) continue;
+            for (String domain : normalizedDomains) {
                 ContentValues values = new ContentValues();
                 values.put("domain", domain);
                 values.put("enabled", 1);
@@ -157,6 +178,19 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             db.endTransaction();
             blockedDomainCache = null;
             blockedDomainCacheAt = 0;
+        }
+        return new DomainRuleReplaceResult(true, normalizedDomains.size(), 0);
+    }
+
+    public static final class DomainRuleReplaceResult {
+        public final boolean success;
+        public final int savedCount;
+        public final int invalidCount;
+
+        DomainRuleReplaceResult(boolean success, int savedCount, int invalidCount) {
+            this.success = success;
+            this.savedCount = savedCount;
+            this.invalidCount = invalidCount;
         }
     }
 
@@ -181,7 +215,7 @@ public final class RuleDatabase extends SQLiteOpenHelper {
 
     /** Cache the small, user-managed domain rule set to avoid a DB cursor per DNS packet. */
     private Set<String> getBlockedDomainSnapshot() {
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         if (blockedDomainCache != null && now - blockedDomainCacheAt < DOMAIN_CACHE_TTL_MS) {
             return blockedDomainCache;
         }
@@ -311,18 +345,5 @@ public final class RuleDatabase extends SQLiteOpenHelper {
 
     public synchronized void clearLogs() { getWritableDatabase().delete("action_logs", null, null); }
 
-    public static String normalizeDomain(String raw) {
-        if (raw == null) return "";
-        String value = raw.trim().toLowerCase(Locale.ROOT);
-        while (value.startsWith(".")) value = value.substring(1);
-        if (value.startsWith("http://")) value = value.substring(7);
-        if (value.startsWith("https://")) value = value.substring(8);
-        int slash = value.indexOf('/');
-        if (slash >= 0) value = value.substring(0, slash);
-        int colon = value.indexOf(':');
-        if (colon >= 0) value = value.substring(0, colon);
-        if (value.startsWith("*.")) value = value.substring(2);
-        if (value.length() > 253 || !value.matches("(?i)(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")) return "";
-        return value;
-    }
+    public static String normalizeDomain(String raw) { return DomainRuleValidator.normalize(raw); }
 }

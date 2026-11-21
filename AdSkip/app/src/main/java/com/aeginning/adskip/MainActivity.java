@@ -613,19 +613,50 @@ public final class MainActivity extends Activity {
         input.setMinLines(7);
         input.setMaxLines(14);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        input.setHint("每行一个域名，例如：\nad.example.com\ntracker.example.net");
+        input.setHint("每行一个完整域名，例如：\nad.example.com\ntracker.example.net");
         input.setText(String.join("\n", database.getBlockedDomains()));
-        new AlertDialog.Builder(this).setTitle("DNS 域名黑名单")
-                .setMessage("已预置常见广告投放、广告联盟及部分追踪域名，涵盖 Google、Microsoft、Amazon、TikTok、腾讯、百度、阿里和常见广告网络。可按需删除或增补。规则会匹配该域名及其子域名；误屏蔽可能导致 App 广告、统计或部分功能异常。")
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("DNS 域名黑名单")
+                .setMessage("只接受完整域名（至少包含一个点），不要填写 URL、IP 地址或单独的 com / net 等顶级域。规则会匹配该域名及其子域名。误屏蔽可能导致 App 广告、统计或部分功能异常。")
                 .setView(input)
                 .setNegativeButton("取消", null)
-                .setPositiveButton("保存", (dialog, which) -> {
+                .setPositiveButton("保存", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(view -> {
                     String[] lines = input.getText().toString().split("[\\r\\n,;]+", -1);
                     List<String> rules = new ArrayList<>();
                     for (String line : lines) if (!line.trim().isEmpty()) rules.add(line.trim());
-                    database.replaceDomainRules(rules);
+
+                    RuleDatabase.DomainRuleReplaceResult result = database.replaceDomainRules(rules);
+                    if (!result.success) {
+                        Toast.makeText(this,
+                                "存在 " + result.invalidCount + " 条无效规则，当前 DNS 名单未修改。请检查域名格式。",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if (result.savedCount == 0) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("确认清空 DNS 黑名单")
+                                .setMessage("当前输入为空。确认后会删除全部 DNS 过滤规则，广告域名将不再被 DNS 模块拦截。")
+                                .setNegativeButton("继续编辑", null)
+                                .setPositiveButton("确认清空", (confirm, which) -> {
+                                    RuleDatabase.DomainRuleReplaceResult cleared =
+                                            database.replaceDomainRules(new ArrayList<>());
+                                    if (cleared.success) {
+                                        dialog.dismiss();
+                                        refreshStatus();
+                                        Toast.makeText(this, "DNS 黑名单已清空", Toast.LENGTH_SHORT).show();
+                                    }
+                                }).show();
+                        return;
+                    }
+                    dialog.dismiss();
                     refreshStatus();
-                }).show();
+                    Toast.makeText(this, "已保存 " + result.savedCount + " 条 DNS 域名规则", Toast.LENGTH_SHORT).show();
+                }));
+        dialog.show();
     }
 
 

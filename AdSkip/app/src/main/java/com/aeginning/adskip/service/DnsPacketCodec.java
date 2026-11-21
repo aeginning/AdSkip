@@ -19,9 +19,9 @@ final class DnsPacketCodec {
         if (length < 28) return null;
         int ihl = (packet[0] & 0x0F) * 4;
         if (ihl < 20 || length < ihl + 8 || (packet[9] & 0xFF) != 17) return null;
-        if ((u16(packet, 6) & 0x3FFF) != 0) return null;
+        if ((u16(packet, 6) & 0xBFFF) != 0) return null; // Reject reserved flag and all fragments.
         int totalLen = u16(packet, 2);
-        if (totalLen > length || totalLen < ihl + 8) return null;
+        if (totalLen != length || totalLen < ihl + 8) return null;
         return parseUdp(packet, totalLen, ihl, 4,
                 Arrays.copyOfRange(packet, 12, 16), Arrays.copyOfRange(packet, 16, 20));
     }
@@ -30,7 +30,7 @@ final class DnsPacketCodec {
         if (length < 48) return null;
         int payloadLength = u16(packet, 4);
         int totalLength = 40 + payloadLength;
-        if (payloadLength < 8 || totalLength > length) return null;
+        if (payloadLength < 8 || totalLength != length) return null;
         int nextHeader = packet[6] & 0xFF;
         int offset = 40;
         int headers = 0;
@@ -69,13 +69,14 @@ final class DnsPacketCodec {
         int destinationPort = u16(packet, udpOffset + 2);
         if (destinationPort != 53) return null;
         int udpLength = u16(packet, udpOffset + 4);
-        if (udpLength < 8 || udpOffset + udpLength > totalLength) return null;
+        if (udpLength < 8 || udpOffset + udpLength != totalLength) return null;
         int dnsOffset = udpOffset + 8;
         int dnsLength = udpLength - 8;
         if (dnsLength < 17 || dnsLength > 4096) return null;
         byte[] dns = Arrays.copyOfRange(packet, dnsOffset, dnsOffset + dnsLength);
         String domain = readQuestionName(dns);
-        if (domain.isEmpty() || (dns[2] & 0x80) != 0) return null; // Queries only.
+        if (domain.isEmpty() || (dns[2] & 0x80) != 0 || (dns[2] & 0x78) != 0) return null;
+        // Only standard DNS queries are filtered; UPDATE and other opcodes pass through untouched.
         return new Query(ipVersion, sourceAddress, destinationAddress, sourcePort, destinationPort, dns);
     }
 
@@ -265,8 +266,8 @@ final class DnsPacketCodec {
         int questionEnd = findQuestionEnd(query);
         if (questionEnd < 0) return null;
         byte[] response = Arrays.copyOf(query, questionEnd);
-        response[2] = (byte) 0x81;
-        response[3] = (byte) 0x83;
+        response[2] = (byte) ((query[2] & 0x79) | 0x80); // QR + preserve opcode/RD.
+        response[3] = (byte) ((query[3] & 0x10) | 0x80 | 0x03); // RA + preserve CD + NXDOMAIN.
         put16(response, 4, 1);
         put16(response, 6, 0);
         put16(response, 8, 0);
@@ -279,8 +280,8 @@ final class DnsPacketCodec {
         int questionEnd = findQuestionEnd(query);
         if (questionEnd < 0) return null;
         byte[] response = Arrays.copyOf(query, questionEnd);
-        response[2] = (byte) 0x81;
-        response[3] = (byte) 0x82;
+        response[2] = (byte) ((query[2] & 0x79) | 0x80); // QR + preserve opcode/RD.
+        response[3] = (byte) ((query[3] & 0x10) | 0x80 | 0x02); // RA + preserve CD + SERVFAIL.
         put16(response, 4, 1);
         put16(response, 6, 0);
         put16(response, 8, 0);

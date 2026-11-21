@@ -76,14 +76,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
                 && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return;
 
-        CharSequence packageName = event.getPackageName();
-        if (packageName == null) return;
-        String pkg = packageName.toString();
-        // Keep only the latest window identity (no history and no screen text) for foreground diagnostics.
+        // Invalidate delayed actions even if Android emits a window event without a package name.
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             windowGeneration++;
             cancelPendingNodeConfirmation();
         }
+        CharSequence packageName = event.getPackageName();
+        if (packageName == null) return;
+        String pkg = packageName.toString();
+        // Keep only the latest window identity (no history and no screen text) for foreground diagnostics.
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             CharSequence className = event.getClassName();
             getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
@@ -456,10 +457,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         return dispatchGesture(gesture, null, mainHandler);
     }
 
-    @Override public void onInterrupt() { cancelPendingNodeConfirmation(); }
+    @Override public void onInterrupt() {
+        // An interrupted service must never complete a previously queued OCR/node click.
+        windowGeneration++;
+        cancelPendingNodeConfirmation();
+    }
 
     @Override public void onDestroy() {
         destroyed = true;
+        windowGeneration++;
         cancelPendingNodeConfirmation();
         if (chineseRecognizer != null) chineseRecognizer.close();
         if (latinRecognizer != null) latinRecognizer.close();

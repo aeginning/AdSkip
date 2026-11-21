@@ -1,9 +1,17 @@
 # AdSkip 智能跳广告助手
 
-版本：**1.2.2**（完整 UI 视觉与交互优化）
+版本：**1.2.3**（稳定性与安全修复）
 包名：`com.aeginning.adskip`
 技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
 最低系统：Android 8.0（API 26）
+
+## 1.2.3 稳定性与安全修复
+
+- DNS 规则拒绝裸顶级域、单标签主机名、IP 地址和 URL；支持合法 IDN 域名转为 ASCII/Punycode。
+- DNS 规则替换前先完整校验；包含无效域名时不会覆盖现有名单。清空操作要求二次确认，并限制最多 5,000 条规则。
+- 修复无障碍窗口变化事件缺少包名时没有使待执行动作失效的问题；系统中断服务时也会使待执行识别点击失效。
+- DNS IPv4/IPv6 包长、UDP 长度、IPv4 保留分片位和 DNS opcode 检查更严格；NXDOMAIN / SERVFAIL 响应保留 RD/CD 标志。
+- DNS 规则缓存使用单调时钟，避免系统时间调整影响缓存过期判断。
 
 ## 1.2.2 更新
 
@@ -72,7 +80,7 @@
 
 - 新增兼容性报告：Android 版本/API、设备型号、OCR 截图 API 能力、无障碍状态、DNS VPN 状态、Shizuku 状态、Java 堆内存快照、已启用 App 数和本地统计。
 - GitHub Actions 使用 JDK 17 和 Gradle 8.11.1，执行 JUnit、Android Lint、Debug APK 构建，并分别上传 APK 和测试报告。
-- CI Artifact：`AdSkip-1.2.1-debug-apk` 和 `AdSkip-1.2.1-reports`。
+- CI Artifact：`AdSkip-1.2.3-debug-apk` 和 `AdSkip-1.2.3-reports`。
 
 ## 2. 工程结构
 
@@ -111,7 +119,7 @@ AdSkip/
 
 ## 3. 构建
 
-环境：JDK 17、Gradle 8.9、Android SDK Platform 35、Build Tools 35.0.0。
+环境：JDK 17、Gradle 8.11.1、Android SDK Platform 36、Build Tools 36.0.0。
 
 ```bash
 gradle --version
@@ -122,7 +130,7 @@ gradle :app:assembleDebug
 
 APK 输出：`app/build/outputs/apk/debug/app-debug.apk`。这是 Debug 测试包，不是 Release 上架签名包；项目未包含正式签名密钥。
 
-也可以把整个项目目录上传到 GitHub，在 **Actions → Android CI** 运行工作流，完成后下载 `AdSkip-1.2.0-debug-apk` Artifact。单元测试和 Lint 报告在 `AdSkip-1.2.0-reports`。
+也可以把整个项目目录上传到 GitHub，在 **Actions → Android CI** 运行工作流，完成后下载 `AdSkip-1.2.3-debug-apk` Artifact。单元测试和 Lint 报告在 `AdSkip-1.2.3-reports`。
 
 ## 4. 首次使用
 
