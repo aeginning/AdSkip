@@ -36,6 +36,27 @@ jobs:
           print("DnsResponseCache generic signature verified.")
           PY
 
+      - name: Inspect lint source context
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          files = {
+              "MainActivity.java": ("AdSkip/app/src/main/java/com/aeginning/adskip/MainActivity.java", [(80,105),(160,180),(210,230),(395,412),(505,525),(640,660)]),
+              "AndroidManifest.xml": ("AdSkip/app/src/main/AndroidManifest.xml", [(1,75)]),
+              "AdSkipAccessibilityService.java": ("AdSkip/app/src/main/java/com/aeginning/adskip/service/AdSkipAccessibilityService.java", [(440,460)]),
+              "DnsFilterVpnService.java": ("AdSkip/app/src/main/java/com/aeginning/adskip/service/DnsFilterVpnService.java", [(215,245)]),
+              "ad_accessibility_service.xml": ("AdSkip/app/src/main/res/xml/ad_accessibility_service.xml", [(1,30)]),
+              "strings.xml": ("AdSkip/app/src/main/res/values/strings.xml", [(1,30)]),
+          }
+          for name, (path, ranges) in files.items():
+              lines = Path(path).read_text(encoding="utf-8").splitlines()
+              print(f"\\n===== {name} =====")
+              for start, end in ranges:
+                  print(f"--- lines {start}-{end} ---")
+                  for i in range(start, min(end, len(lines)) + 1):
+                      print(f"{i}: {lines[i-1]}")
+          PY
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
