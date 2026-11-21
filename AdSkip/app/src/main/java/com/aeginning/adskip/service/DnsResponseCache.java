@@ -6,7 +6,7 @@ import java.util.Map;
 /** Small process-local positive DNS cache. Entries are keyed by QNAME/QTYPE/QCLASS. */
 final class DnsResponseCache {
     private static final int MAX_ENTRIES = 256;
-    private final LinkedHashMap<String, CacheEntry> entries = new LinkedHashMap<String, Entry>(32, 0.75f, true) {
+    private final LinkedHashMap<String, CacheEntry> entries = new LinkedHashMap<String, CacheEntry>(32, 0.75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<String, CacheEntry> eldest) {
             return size() > MAX_ENTRIES;
         }
@@ -15,7 +15,7 @@ final class DnsResponseCache {
     synchronized byte[] get(byte[] query, long nowElapsedRealtime) {
         String key = DnsPacketCodec.cacheKey(query);
         if (key == null) return null;
-        CacheEntry entry = entries.get(key);
+        CacheCacheEntry entry = entries.get(key);
         if (entry == null) return null;
         if (entry.expiresAt <= nowElapsedRealtime) {
             entries.remove(key);
