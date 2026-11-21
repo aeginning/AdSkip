@@ -589,8 +589,16 @@ public final class MainActivity extends Activity {
                 .setView(scroll)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存", (ignored, which) -> {
+                    List<String> packages = new ArrayList<>(checks.size());
+                    Set<String> enabledPackages = new HashSet<>();
                     for (CheckBox check : checks) {
-                        database.setAppEnabled((String) check.getTag(), check.isChecked());
+                        String packageName = (String) check.getTag();
+                        packages.add(packageName);
+                        if (check.isChecked()) enabledPackages.add(packageName);
+                    }
+                    if (!database.updateAppRules(packages, enabledPackages)) {
+                        Toast.makeText(this, "保存应用规则失败，原有规则未修改。", Toast.LENGTH_LONG).show();
+                        return;
                     }
                     refreshStatus();
                 })
@@ -643,11 +651,9 @@ public final class MainActivity extends Activity {
                                 .setNegativeButton("继续编辑", null)
                                 .setPositiveButton("确认清空", (confirm, which) -> {
                                     database.clearDomainRules();
-                                    {
-                                        dialog.dismiss();
-                                        refreshStatus();
-                                        Toast.makeText(this, "DNS 黑名单已清空", Toast.LENGTH_SHORT).show();
-                                    }
+                                    dialog.dismiss();
+                                    refreshStatus();
+                                    Toast.makeText(this, "DNS 黑名单已清空", Toast.LENGTH_SHORT).show();
                                 }).show();
                         return;
                     }

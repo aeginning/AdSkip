@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import com.aeginning.adskip.engine.TextMatcher;
 import com.aeginning.adskip.engine.DomainRuleValidator;
@@ -22,6 +23,8 @@ public final class RuleDatabase extends SQLiteOpenHelper {
     private static final int DB_VERSION = 3;
     private static final long DOMAIN_CACHE_TTL_MS = 2_000L;
     private static final int MAX_DOMAIN_RULES = 5_000;
+    private static final Pattern PACKAGE_NAME =
+            Pattern.compile("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+");
 
     /**
      * Conservative starter rules compiled from common ad-provider and tracker hostnames
@@ -123,6 +126,32 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         values.put("package_name", packageName);
         values.put("enabled", enabled ? 1 : 0);
         getWritableDatabase().insertWithOnConflict("app_rules", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    /**
+     * Persist the visible launcher selection as one SQLite transaction.
+     * Packages not present in the current launcher list are intentionally left untouched.
+     */
+    public synchronized boolean updateAppRules(List<String> packageNames, Set<String> enabledPackages) {
+        if (packageNames == null || enabledPackages == null) return false;
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            for (String packageName : packageNames) {
+                if (packageName == null || packageName.length() > 255
+                        || !PACKAGE_NAME.matcher(packageName).matches()) continue;
+                ContentValues values = new ContentValues();
+                values.put("package_name", packageName);
+                values.put("enabled", enabledPackages.contains(packageName) ? 1 : 0);
+                long rowId = db.insertWithOnConflict("app_rules", null, values,
+                        SQLiteDatabase.CONFLICT_REPLACE);
+                if (rowId == -1) return false;
+            }
+            db.setTransactionSuccessful();
+            return true;
+        } finally {
+            db.endTransaction();
+        }
     }
 
     public synchronized boolean isAppEnabled(String packageName) {
