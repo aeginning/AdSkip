@@ -33,7 +33,12 @@ public final class SensitiveInputPolicy {
                 || variation == NUMBER_VARIATION_PASSWORD) return true;
         if (!editable) return false;
 
-        String metadata = normalize(hint) + " " + normalize(contentDescription);
+        String normalizedHint = normalize(hint);
+        String normalizedDescription = normalize(contentDescription);
+        // A field explicitly labelled only "密码" is sensitive; longer phrases such
+        // as "搜索密码教程" are ordinary search metadata and must not block scanning.
+        if ("密码".equals(normalizedHint) || "密码".equals(normalizedDescription)) return true;
+        String metadata = normalizedHint + " " + normalizedDescription;
         for (String token : SENSITIVE_HINTS) {
             if (metadata.contains(normalize(token))) return true;
         }
