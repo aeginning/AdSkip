@@ -1,6 +1,7 @@
 package com.aeginning.adskip.service;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
@@ -56,8 +57,8 @@ final class FloatingStatusOverlay {
 
     FloatingStatusOverlay(AccessibilityService service) {
         this.service = service;
-        windowManager = (WindowManager) service.getSystemService(AccessibilityService.WINDOW_SERVICE);
-        preferences = service.getSharedPreferences("adskip_settings", AccessibilityService.MODE_PRIVATE);
+        windowManager = (WindowManager) service.getSystemService(Context.WINDOW_SERVICE);
+        preferences = service.getSharedPreferences("adskip_settings", Context.MODE_PRIVATE);
         touchSlop = ViewConfiguration.get(service).getScaledTouchSlop();
     }
 
@@ -188,7 +189,7 @@ final class FloatingStatusOverlay {
         button.setTextSize(19);
         button.setTextColor(0xFFFFFFFF);
         button.setGravity(Gravity.CENTER);
-        button.setBackground(background(0x334FFFFFF, 0, 8));
+        button.setBackground(background(0x33FFFFFF, 0, 8));
         button.setPadding(dp(8), 0, dp(8), 0);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(30), dp(30));
         params.leftMargin = dp(4);
