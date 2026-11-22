@@ -40,11 +40,15 @@ public class DnsFeedManagerTest {
                 DnsFeedManager.Source.ADAWAY_HOSTS,
                 DnsFeedManager.Source.ONEHOSTS_LITE,
                 DnsFeedManager.Source.DAN_POLLOCK_HOSTS)) {
+            byte[] content = source.format == DnsFeedParser.Format.DNSMASQ
+                    ? validDnsmasq() : validHosts();
             DnsFeedManager.DownloadedFeed result = DnsFeedManager.download(source,
-                    url -> new FakeConnection(url, 200, validHosts(), null, -1),
+                    url -> new FakeConnection(url, 200, content, null, -1),
                     millis -> { }, null);
             assertEquals(source, result.source);
-            assertEquals(DnsFeedParser.Format.HOSTS, result.source.format);
+            assertEquals(source == DnsFeedManager.Source.ONEHOSTS_LITE
+                    ? DnsFeedParser.Format.DNSMASQ : DnsFeedParser.Format.HOSTS,
+                    result.source.format);
             assertEquals(1_100, result.parsed.domains.size());
             assertEquals(source.mirrorUrls.get(0), result.downloadedFrom);
         }
