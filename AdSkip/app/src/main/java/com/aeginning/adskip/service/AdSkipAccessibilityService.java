@@ -742,10 +742,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             try {
                 StringBuilder text = new StringBuilder();
                 collectNodes(root, 0, nodes, text);
-                if (hasSensitiveInputInCurrentWindow || nodeScanIncomplete) {
+                if (sensitiveInputBoundsUnknown || nodeScanIncomplete) {
                     logDiagnostic(packageName, "CLICK_VERIFY_UNKNOWN",
-                            "点击后页面出现敏感区域或控件树不完整，无法安全确认");
+                            "点击后敏感区域边界未知或控件树不完整，无法安全确认");
                     return;
+                }
+                if (hasSensitiveInputInCurrentWindow) {
+                    logDiagnostic(packageName, "CLICK_VERIFY_SENSITIVE_PRESENT",
+                            "页面存在敏感输入区域；验证将只检查敏感区域之外的原候选位置");
                 }
                 boolean stillVisible = false;
                 int screenWidth = getResources().getDisplayMetrics().widthPixels;
@@ -755,6 +759,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     if (TextMatcher.similarityPercent(expectedLabel, currentLabel) < 65) continue;
                     Rect currentBounds = new Rect();
                     node.getBoundsInScreen(currentBounds);
+                    if (overlapsCurrentSensitiveRegion(currentBounds)) continue;
                     if (TargetStability.areBoundsConsistent(
                             expectedBounds.left, expectedBounds.top, expectedBounds.right, expectedBounds.bottom,
                             currentBounds.left, currentBounds.top, currentBounds.right, currentBounds.bottom,
