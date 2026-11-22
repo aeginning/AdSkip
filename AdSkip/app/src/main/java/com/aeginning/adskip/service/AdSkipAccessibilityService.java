@@ -487,7 +487,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private int getMinimumSkipScore() {
-        return 90 - Math.round(getSkipButtonSensitivity() * 0.30f);
+        return AdConfidenceScorer.minimumScoreForSensitivity(getSkipButtonSensitivity());
     }
 
     private boolean isSecondConfirmationEnabled() {
