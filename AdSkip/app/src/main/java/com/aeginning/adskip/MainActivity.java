@@ -1207,6 +1207,7 @@ public final class MainActivity extends Activity {
                 .show();
     }
 
+    @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
     private android.widget.Switch addOverlayPreferenceSwitch(
             LinearLayout parent, String labelText, String preferenceKey, boolean defaultValue) {
         android.widget.Switch option = new android.widget.Switch(this);
