@@ -875,9 +875,10 @@ public final class MainActivity extends Activity {
                 }
                 if (!importResult.success) failure = importResult.error;
             } catch (Exception error) {
-                failure = error instanceof DnsFeedManager.DownloadException
+                failure = (error instanceof DnsFeedManager.DownloadException
                         ? ((DnsFeedManager.DownloadException) error).toUserMessage()
-                        : error.getClass().getSimpleName() + ": " + error.getMessage();
+                        : error.getClass().getSimpleName() + ": " + error.getMessage())
+                        + "\n当前网络：" + DnsFeedManager.describeActiveNetwork(getApplicationContext());
             }
 
             final int count = parsedCount;
