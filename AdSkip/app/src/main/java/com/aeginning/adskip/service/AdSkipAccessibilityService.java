@@ -1354,14 +1354,28 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private boolean isActiveWindowSafeForTarget(String expectedPackage, long generation) {
-        if (destroyed || generation != windowGeneration) return false;
+        if (destroyed || generation != windowGeneration) {
+            logDiagnostic(expectedPackage, "WINDOW_STALE", "待执行动作对应的窗口代次已失效");
+            return false;
+        }
         AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) return false;
+        if (root == null) {
+            logDiagnostic(expectedPackage, "NO_WINDOW", "执行前复核时 Android 未提供活动窗口");
+            return false;
+        }
         try {
             CharSequence packageName = root.getPackageName();
-            return generation == windowGeneration && packageName != null
-                    && expectedPackage.contentEquals(packageName)
-                    && !containsSensitiveInput(root);
+            if (generation != windowGeneration || packageName == null
+                    || !expectedPackage.contentEquals(packageName)) {
+                logDiagnostic(expectedPackage, "WINDOW_MISMATCH", "执行前复核发现前台应用已切换");
+                return false;
+            }
+            if (containsSensitiveInput(root)) {
+                logDiagnostic(expectedPackage, "SENSITIVE_INPUT",
+                        "执行前复核发现密码、支付码或验证码输入区域，已取消动作");
+                return false;
+            }
+            return true;
         } finally {
             recycleNode(root);
         }
@@ -1374,7 +1388,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private boolean containsSensitiveInput(AccessibilityNodeInfo node, int depth, int[] visited) {
         if (node == null) return false;
         if (depth > MAX_DEPTH || ++visited[0] > MAX_NODES) return true;
-        if (node.isVisibleToUser() && (node.isPassword() || node.isEditable())) return true;
+        if (node.isVisibleToUser() && SensitiveInputPolicy.isSensitive(
+                node.isPassword(), node.isEditable(), node.getInputType(),
+                node.getHintText(), node.getContentDescription())) return true;
         for (int i = 0; i < node.getChildCount(); i++) {
             AccessibilityNodeInfo child = node.getChild(i);
             if (child == null) continue;
@@ -1397,13 +1413,34 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         return "跳过按钮";
     }
 
-    private boolean dispatchTap(int x, int y) {
+    private boolean dispatchTap(int x, int y, String packageName) {
         Path path = new Path();
         path.moveTo(x, y);
         GestureDescription gesture = new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(path, 0, 65))
                 .build();
-        return dispatchGesture(gesture, null, mainHandler);
+        try {
+            boolean accepted = dispatchGesture(gesture, new GestureResultCallback() {
+                @Override public void onCompleted(GestureDescription completedGesture) {
+                    logDiagnostic(packageName, "GESTURE_COMPLETED",
+                            "Android 已完成坐标手势；点击是否生效仍以页面变化验证为准");
+                }
+
+                @Override public void onCancelled(GestureDescription cancelledGesture) {
+                    logDiagnostic(packageName, "GESTURE_CANCELLED",
+                            "Android 系统取消坐标手势，按钮未确认点击");
+                }
+            }, mainHandler);
+            if (!accepted) {
+                logDiagnostic(packageName, "GESTURE_REJECTED",
+                        "dispatchGesture 未接受本次手势，可能被系统动画或其他手势占用");
+            }
+            return accepted;
+        } catch (Throwable failure) {
+            logDiagnostic(packageName, "GESTURE_ERROR",
+                    "坐标手势派发异常：" + failure.getClass().getSimpleName());
+            return false;
+        }
     }
 
     @Override public void onInterrupt() {
@@ -1425,6 +1462,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (floatingStatusOverlay != null) floatingStatusOverlay.remove();
         if (chineseRecognizer != null) chineseRecognizer.close();
         if (latinRecognizer != null) latinRecognizer.close();
+        if (japaneseRecognizer != null) japaneseRecognizer.close();
+        if (koreanRecognizer != null) koreanRecognizer.close();
+        if (devanagariRecognizer != null) devanagariRecognizer.close();
+        diagnosticThrottle.clear();
         if (database != null) database.close();
         screenshotExecutor.shutdownNow();
         super.onDestroy();
