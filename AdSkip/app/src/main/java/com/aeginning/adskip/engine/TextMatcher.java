@@ -14,7 +14,7 @@ public final class TextMatcher {
             "禁止跳过", "无需跳过", "不允许跳过", "不支持跳过",
             "暂不可跳过", "尚不可跳过", "当前广告不可跳过", "此广告不可跳过",
             "不可跳过此广告", "跳过广告不可用", "跳过按钮不可用", "广告暂不可跳过",
-            "skip not available", "skip unavailable", "ad is not skippable",
+            "skip not available", "ad is not skippable",
             "this ad is not skippable", "ad cannot be skipped", "skip button disabled",
             "広告をスキップできません", "広告はスキップできません",
             "광고를 건너뛸 수 없습니다"
@@ -22,7 +22,7 @@ public final class TextMatcher {
     private static final String[] AD_CONTEXT = {
             "广告", "赞助内容", "推广内容", "广告倒计时", "广告播放中",
             "赞助广告", "推广广告", "商业推广", "sponsored", "sponsored content",
-            "promoted content", "advertisement", "advertising", "ad content", "广告", "広告", "광고", "秒后跳过"
+            "promoted content", "advertisement", "advertising", "ad content", "広告", "광고", "秒后跳过"
     };
 
     private static final String[] EXPLICIT_SKIP_AD = {
@@ -32,6 +32,14 @@ public final class TextMatcher {
             "skip video ad", "skip this video ad", "skip current video ad", "skip current video advertisement", "skip advertisement",
             "skip sponsored ad", "skip sponsored content",
             "広告をスキップ", "광고 건너뛰기"
+    };
+
+    /** Shared high-risk screen context used by both scoring and the final click gate. */
+    private static final String[] CRITICAL_ACTION_CONTEXT = {
+            "付款确认", "确认购买", "支付密码", "授权", "权限申请", "支付",
+            "购买", "订阅", "下载", "安装", "登录", "注册", "permission", "allow access",
+            "install this app", "download now", "checkout", "payment", "purchase", "subscribe",
+            "sign in", "sign up", "register"
     };
 
     private static final String[] EXPLICIT_CLOSE_AD = {
@@ -98,6 +106,11 @@ public final class TextMatcher {
         String value = normalize(text);
         for (String token : DANGEROUS) if (value.contains(normalize(token))) return true;
         return false;
+    }
+
+    /** Returns true when the surrounding screen contains any purchase, permission or account flow. */
+    public static boolean hasCriticalActionContext(String text) {
+        return containsAny(normalize(text), CRITICAL_ACTION_CONTEXT);
     }
 
     public static boolean isCountdown(String text) {

@@ -148,6 +148,28 @@ public class DnsPacketCodecTest {
         assertEquals("extension.example.test", parsed.domain);
     }
 
+    @Test public void acceptsOnlyWellFormedAtomicIpv6FragmentHeaders() throws Exception {
+        byte[] dns = makeDnsQuery("atomic.example.test");
+        int udpLength = 8 + dns.length;
+        byte[] packet = new byte[40 + 8 + udpLength];
+        packet[0] = 0x60;
+        DnsPacketCodec.put16(packet, 4, 8 + udpLength);
+        packet[6] = 44;
+        packet[40] = 17;
+        DnsPacketCodec.put16(packet, 42, 0);
+        DnsPacketCodec.put16(packet, 48, 53004);
+        DnsPacketCodec.put16(packet, 50, 53);
+        DnsPacketCodec.put16(packet, 52, udpLength);
+        System.arraycopy(dns, 0, packet, 56, dns.length);
+        assertNotNull(DnsPacketCodec.parseQuery(packet, packet.length));
+
+        // Reserved fragment-header bits must not be silently accepted.
+        DnsPacketCodec.put16(packet, 42, 0x0002);
+        assertNull(DnsPacketCodec.parseQuery(packet, packet.length));
+        DnsPacketCodec.put16(packet, 42, 0x0001); // M flag.
+        assertNull(DnsPacketCodec.parseQuery(packet, packet.length));
+    }
+
     @Test public void rejectsFragmentedIpv6DnsPackets() throws Exception {
         byte[] dns = makeDnsQuery("fragment.example.test");
         int udpLength = 8 + dns.length;

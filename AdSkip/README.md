@@ -1,11 +1,26 @@
 # AdSkip 智能跳广告助手
 
-版本：**1.3.0**（最终候选版）
+版本：**1.3.4**（全量质量优化版）
 包名：`com.aeginning.adskip`
 技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
 最低系统：Android 8.0（API 26）
 
-## 1.3.0 最终版增强
+## 1.3.4 全量质量优化
+
+- 将广告场景中的高风险操作上下文提取为唯一规则入口；评分器与最终安全策略共用，避免两套词表逐渐不一致。
+- 严格拒绝包含非零偏移、更多分片标志或保留位异常的 IPv6 Fragment Header；仅接受字段完全为零的 Atomic Fragment。
+- DNS 数据包处理异常增加按异常类型节流的本地日志，不保存完整数据包或额外屏幕信息；关闭过程中的数据库异常不会影响服务退出。
+- 清理文字匹配词库中的重复 token，并移除 DNS 下载错误分类中未使用的异常引用字段；不改变匹配词覆盖或订阅行为。
+- 移除已失效的嵌套 CI 工作流；唯一生效的仓库级工作流位于 `.github/workflows/android.yml`。
+- 同步 README、DNS 第三方来源说明和 CI Artifact 命名，保留原始 1.2.0 源码 ZIP 作为历史快照。
+
+## 1.3.3 DNS 下载可靠性增强
+
+- HaGeZi Multi LIGHT 和 StevenBlack Unified Hosts 增加多个 HTTPS 镜像，先尝试每个镜像，再对临时连接故障进行限次退避重试。
+- 增加 90 秒总时间、9 秒连接超时、15 秒读取超时、12 MiB 流式大小上限、HTTPS 与受信任镜像重定向检查。
+- 展示镜像切换进度、错误分类和重试入口；下载与内容校验完全通过后才以事务替换订阅，失败不改动旧规则。
+
+## 1.3.0 功能基线
 
 ### 广告识别与跳过能力
 - 保留原有无障碍控件树、OCR、本地误判规则、二次观察、坐标安全校验、选定 App 白名单和 Shizuku 只读诊断功能。
@@ -134,7 +149,6 @@
 
 ```text
 AdSkip/
-├── .github/workflows/android.yml
 ├── app/
 │   ├── src/main/aidl/com/aeginning/adskip/privilege/IAdSkipShellService.aidl
 │   ├── src/main/java/com/aeginning/adskip/
@@ -164,6 +178,7 @@ AdSkip/
 │       ├── engine/DnsFeedParserTest.java
 │       ├── privilege/PrivilegeUtilsTest.java
 │       ├── service/DnsPacketCodecTest.java
+│       ├── service/DnsFeedManagerTest.java
 │       └── service/DnsResponseCacheTest.java
 ├── build.gradle
 ├── gradle.properties
@@ -198,7 +213,7 @@ APK 输出：`app/build/outputs/apk/debug/app-debug.apk`。这是 Debug 测试�
 
 ## 5. 测试与限制
 
-当前工作容器中执行了 35 个纯 Java 测试方法（使用本地轻量 JUnit 注解/断言兼容运行器），并通过 XML 与 GitHub Actions YAML 解析检查。这不等同于 Android Gradle 构建或真机测试；正式 `:app:testDebugUnitTest`、Lint 和 APK 构建由 GitHub Actions 执行。
+以仓库根目录 `.github/workflows/android.yml` 的 GitHub Actions 结果为准：CI 执行完整 Android Gradle `:app:testDebugUnitTest`、`:app:lintDebug` 和 `:app:assembleDebug`，并分别上传 Debug APK 与测试/Lint 报告。CI 成功不等于已在所有 OEM 真机验证；无障碍、截图、VPN 与各广告 SDK 的实际行为仍需目标设备测试。
 
 新增置信度测试覆盖高置信度跳过词、普通词广告上下文、敏感词、倒计时（包括上下文倒计时）和两次观察一致性。DNS 测试覆盖 IPv4/IPv6 UDP 查询解析、响应地址/端口反转、IPv6 UDP 非零校验和、NXDOMAIN/SERVFAIL、截断标志、上游响应验证、TTL 提取/递减和 DNS 缓存键隔离。原有文字匹配和 Shizuku 工具测试保留。
 

@@ -120,6 +120,14 @@ public class TextMatcherTest {
         assertEquals(60, AdConfidenceScorer.minimumScoreForSensitivity(120));
     }
 
+    @Test public void criticalActionContextIsSharedAndConservative() {
+        assertTrue(TextMatcher.hasCriticalActionContext("广告页面 · 确认购买"));
+        assertTrue(TextMatcher.hasCriticalActionContext("Sponsored content · Allow access"));
+        assertTrue(TextMatcher.hasCriticalActionContext("视频广告 · 支付密码"));
+        assertFalse(TextMatcher.hasCriticalActionContext("广告播放中 · 跳过"));
+        assertFalse(TextMatcher.hasCriticalActionContext("普通视频"));
+    }
+
     @Test public void normalizesFullWidthAndZeroWidthAdLabels() {
         assertTrue(TextMatcher.isCountdown("Ｓｋｉｐ ３"));
         assertTrue(TextMatcher.isCountdown("跳过\u200B 3"));
