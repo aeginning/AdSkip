@@ -28,9 +28,12 @@ public final class SafetyPolicy {
         if (bounds == null || screenWidth <= 0 || screenHeight <= 0) return false;
         if (bounds.isEmpty() || bounds.left < 0 || bounds.top < 0
                 || bounds.right > screenWidth || bounds.bottom > screenHeight) return false;
-        if (bounds.width() < 24 || bounds.height() < 18
-                || bounds.width() > screenWidth * 0.65f
-                || bounds.height() > screenHeight * 0.25f) return false;
+        boolean closeGlyphCandidate = TextMatcher.isCloseGlyph(candidateText);
+        int minWidth = closeGlyphCandidate ? 12 : 24;
+        int minHeight = closeGlyphCandidate ? 12 : 18;
+        if (bounds.width() < minWidth || bounds.height() < minHeight
+                || bounds.width() > screenWidth * (closeGlyphCandidate ? 0.16f : 0.65f)
+                || bounds.height() > screenHeight * (closeGlyphCandidate ? 0.10f : 0.25f)) return false;
         // Keep coordinate actions away from system gesture regions. An explicitly
         // enabled, OCR-confirmed skip countdown may live in the top-right splash-ad slot.
         boolean adContext = TextMatcher.hasAdContext(surroundingText);
@@ -44,7 +47,7 @@ public final class SafetyPolicy {
                 && adContext
                 && bounds.left >= screenWidth * 0.70f
                 && bounds.centerX() >= screenWidth * 0.82f
-                && bounds.top >= screenHeight * 0.025f
+                && bounds.top >= screenHeight * 0.01f
                 && bounds.bottom <= screenHeight * 0.22f
                 && bounds.width() <= screenWidth * 0.16f
                 && bounds.height() <= screenHeight * 0.10f;
