@@ -35,25 +35,40 @@ public final class SensitiveInputPolicy {
 
         String normalizedHint = normalize(hint);
         String normalizedDescription = normalize(contentDescription);
-        // A field explicitly labelled only "密码" is sensitive; longer phrases such
-        // as "搜索密码教程" are ordinary search metadata and must not block scanning.
+        // Exact labels and explicit input prompts count; generic search descriptions
+        // such as "搜索验证码教程" or "Search password tutorial" do not.
         if ("密码".equals(normalizedHint) || "密码".equals(normalizedDescription)
                 || isExplicitPasswordHint(normalizedHint)
                 || isExplicitPasswordHint(normalizedDescription)) return true;
-        String metadata = normalizedHint + " " + normalizedDescription;
         for (String token : SENSITIVE_HINTS) {
-            if (metadata.contains(normalize(token))) return true;
+            String normalizedToken = normalize(token);
+            if (matchesSensitiveHint(normalizedHint, normalizedToken)
+                    || matchesSensitiveHint(normalizedDescription, normalizedToken)) return true;
         }
         return false;
     }
 
     private static boolean isExplicitPasswordHint(String value) {
-        if (value.isEmpty()) return false;
-        if ("password".equals(value) || "passcode".equals(value)
-                || "password field".equals(value) || "passcode field".equals(value)) return true;
-        return value.matches(".*\\b(?:enter|type|input|confirm|verify|retype|new|current)\\s+(?:your\\s+)?password\\b.*")
-                || value.matches(".*\\bpassword\\s+(?:required|field|entry)\\b.*");
+        return matchesSensitiveHint(value, "password")
+                || matchesSensitiveHint(value, "passcode")
+                || "password field".equals(value)
+                || "passcode field".equals(value);
+    }
 
+    private static boolean matchesSensitiveHint(String value, String token) {
+        if (value.isEmpty() || token.isEmpty()) return false;
+        if (value.equals(token) || value.equals(token + " field")) return true;
+        String[] prefixes = {
+                "请输入", "输入", "请填写",
+                "enter ", "enter your ", "enter the ",
+                "type ", "type your ", "type the ",
+                "input ", "input your ", "input the ",
+                "provide "
+        };
+        for (String prefix : prefixes) {
+            if (value.equals(prefix + token)) return true;
+        }
+        return false;
     }
 
     private static String normalize(CharSequence value) {
