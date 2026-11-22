@@ -568,8 +568,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             if (box == null || isSuppressedLabel(suppressedLabels, lineText)) continue;
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                                     lineText, context, true, true, true, box.width(), box.height(),
-                                    bitmap.getWidth(), bitmap.getHeight(), allowCountdownClicks);
-                            if (assessment.score >= 75 && assessment.score > bestScore) {
+                                    bitmap.getWidth(), bitmap.getHeight(),
+                                    allowCountdownClicks, getMinimumSkipScore());
+                            if (assessment.score >= getMinimumSkipScore()
+                                    && assessment.score > bestScore) {
                                 best = new OcrCandidate(new Rect(box), lineText, assessment.score);
                                 bestScore = assessment.score;
                             }
@@ -733,15 +735,17 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                             AdConfidenceScorer.Assessment second = AdConfidenceScorer.assess(
                                     line.getText(), context, true, true, true, mapped.width(), mapped.height(),
-                                    screenWidth, screenHeight, isCountdownClickEnabled());
+                                    screenWidth, screenHeight,
+                                    isCountdownClickEnabled(), getMinimumSkipScore());
                             AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                                     firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
                                             : AdConfidenceScorer.Level.REVIEW, "首次 OCR 观察");
-                            if (second.score < 75
-                                    || !AdConfidenceScorer.canProceedAfterSecondObservation(first, second)
+                            if (second.score < getMinimumSkipScore()
+                                    || !AdConfidenceScorer.canProceedAfterSecondObservation(
+                                            first, second, getMinimumSkipScore())
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                                             true, true, true, line.getText(), context,
-                                            isCountdownClickEnabled())) continue;
+                                            isCountdownClickEnabled(), getMinimumSkipScore())) continue;
 
                             if (!isOcrEnabled() || generation != windowGeneration
                                     || !isActiveWindowSafeForTarget(expectedPackage, generation)
