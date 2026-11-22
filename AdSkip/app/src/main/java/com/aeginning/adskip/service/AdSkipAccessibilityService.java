@@ -25,6 +25,7 @@ import com.aeginning.adskip.engine.SensitiveRegionPolicy;
 import com.aeginning.adskip.engine.DiagnosticLogThrottle;
 import com.aeginning.adskip.engine.TargetStability;
 import com.aeginning.adskip.engine.SplashProbePolicy;
+import com.aeginning.adskip.engine.ExtremeSkipPolicy;
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions;
@@ -46,14 +47,8 @@ import java.util.concurrent.Executors;
  * and never clicks purchase, install, permission, subscription, or consent actions.
  */
 public final class AdSkipAccessibilityService extends AccessibilityService {
-    private static final long EVENT_INTERVAL_MS = 350L;
     private static final long CLICK_COOLDOWN_MS = 2_200L;
-    private static final long OCR_AD_INTERVAL_MS = 850L;
-    private static final long OCR_VISUAL_PROBE_INTERVAL_MS = 7_000L;
-    private static final long CLICK_CONFIRM_DELAY_MS = 260L;
-    private static final long COUNTDOWN_RESCAN_INTERVAL_MS = 700L;
     private static final long CLICK_VERIFY_DELAY_MS = 750L;
-    private static final int MAX_COUNTDOWN_RESCANS = 48;
     private static final int OCR_MAX_DIMENSION = 1280;
     private static final int MAX_NODES = 650;
     private static final int MAX_DEPTH = 14;
@@ -208,7 +203,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
 
         long now = SystemClock.elapsedRealtime();
-        if (now - lastScanAt < EVENT_INTERVAL_MS) {
+        if (now - lastScanAt < ExtremeSkipPolicy.eventIntervalMs(isExtremeSkipMode())) {
             recycleNode(fallbackRoot);
             logDiagnostic(pkg, "SCAN_THROTTLED", "短时间收到重复无障碍事件，已合并扫描以降低耗电");
             return;
@@ -532,7 +527,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 recycleNodes(nodes);
             }
         };
-        mainHandler.postDelayed(pendingNodeConfirmation, CLICK_CONFIRM_DELAY_MS);
+        mainHandler.postDelayed(pendingNodeConfirmation,
+                ExtremeSkipPolicy.confirmationDelayMs(isExtremeSkipMode()));
     }
 
     private void logDiagnostic(String packageName, String action, String reason) {
@@ -586,9 +582,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             countdownRescanAttempts = 0;
         }
         if (pendingCountdownRescan != null) return;
-        if (countdownRescanAttempts >= MAX_COUNTDOWN_RESCANS) {
+        int maxRescans = ExtremeSkipPolicy.maxCountdownRescans(isExtremeSkipMode());
+        if (countdownRescanAttempts >= maxRescans) {
             logDiagnostic(packageName, "COUNTDOWN_TIMEOUT",
-                    "主动扫描达到 " + MAX_COUNTDOWN_RESCANS + " 次上限，未发现可安全点击按钮；未执行点击");
+                    "主动扫描达到 " + maxRescans + " 次上限，未发现可安全点击按钮；未执行点击");
             countdownRescanPackage = null;
             countdownRescanAttempts = 0;
             return;
@@ -665,7 +662,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 recycleNodes(nodes);
             }
         };
-        mainHandler.postDelayed(pendingCountdownRescan, COUNTDOWN_RESCAN_INTERVAL_MS);
+        mainHandler.postDelayed(pendingCountdownRescan,
+                ExtremeSkipPolicy.countdownRescanIntervalMs(isExtremeSkipMode()));
     }
 
     private void cancelPendingSplashProbe() {
@@ -690,13 +688,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             splashProbePackage = packageName;
         }
         if (pendingSplashProbe != null) return;
-        if (!SplashProbePolicy.hasMoreAttempts(splashProbeAttempts)) {
+        boolean extreme = isExtremeSkipMode();
+        if (!SplashProbePolicy.hasMoreAttempts(splashProbeAttempts, extreme)) {
             logDiagnostic(packageName, "SPLASH_PROBE_FINISHED",
                     "开屏主动探测达到有限次数上限；后续交由普通事件和低频视觉探测处理");
             cancelPendingSplashProbe();
             return;
         }
-        long delay = SplashProbePolicy.delayForAttempt(splashProbeAttempts);
+        long delay = SplashProbePolicy.delayForAttempt(splashProbeAttempts, extreme);
         pendingSplashProbe = () -> {
             pendingSplashProbe = null;
             splashProbeAttempts++;
@@ -1003,8 +1002,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return;
         }
         long now = SystemClock.elapsedRealtime();
-        long interval = adContext ? OCR_AD_INTERVAL_MS
-                : splashProbe ? SplashProbePolicy.OCR_INTERVAL_MS : OCR_VISUAL_PROBE_INTERVAL_MS;
+        boolean extreme = isExtremeSkipMode();
+        long interval = adContext ? ExtremeSkipPolicy.adOcrIntervalMs(extreme)
+                : splashProbe ? SplashProbePolicy.ocrIntervalMs(extreme)
+                : ExtremeSkipPolicy.visualProbeIntervalMs(extreme);
         if (now - lastOcrAt < interval) {
             logDiagnostic(expectedPackage, "OCR_THROTTLED", "OCR 截图间隔未达到限制，已节流");
             return;
@@ -1279,8 +1280,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 .getInt("skip_button_sensitivity", 50)));
     }
 
+    private boolean isExtremeSkipMode() {
+        return getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("extreme_skip_mode", false);
+    }
+
     private int getMinimumSkipScore() {
-        return AdConfidenceScorer.minimumScoreForSensitivity(getSkipButtonSensitivity());
+        return ExtremeSkipPolicy.minimumSkipScore(getSkipButtonSensitivity(), isExtremeSkipMode());
     }
 
     private boolean isSecondConfirmationEnabled() {
@@ -1477,7 +1483,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         "请求二次截图异常：" + failure.getClass().getSimpleName());
                 ocrInFlight = false;
             }
-        }, CLICK_CONFIRM_DELAY_MS);
+        }, ExtremeSkipPolicy.confirmationDelayMs(isExtremeSkipMode()));
     }
 
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
