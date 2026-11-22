@@ -21,6 +21,7 @@ import com.aeginning.adskip.engine.SafetyPolicy;
 import com.aeginning.adskip.engine.TextMatcher;
 import com.aeginning.adskip.engine.AdConfidenceScorer;
 import com.aeginning.adskip.engine.SensitiveInputPolicy;
+import com.aeginning.adskip.engine.SensitiveRegionPolicy;
 import com.aeginning.adskip.engine.DiagnosticLogThrottle;
 import com.aeginning.adskip.engine.TargetStability;
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
@@ -1536,9 +1537,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private boolean overlapsSensitiveRegion(Rect target, List<Rect> regions, boolean unknown) {
         if (target == null || unknown) return true;
         for (Rect region : regions) {
-            Rect protectedBounds = new Rect(region);
-            protectedBounds.inset(-dp(24), -dp(18));
-            if (Rect.intersects(target, protectedBounds)) return true;
+            if (SensitiveRegionPolicy.overlapsOrNear(
+                    target.left, target.top, target.right, target.bottom,
+                    region.left, region.top, region.right, region.bottom,
+                    dp(24), dp(18))) return true;
         }
         return false;
     }
