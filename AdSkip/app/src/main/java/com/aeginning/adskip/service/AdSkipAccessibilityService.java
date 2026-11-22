@@ -51,7 +51,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private static final long CLICK_CONFIRM_DELAY_MS = 260L;
     private static final long COUNTDOWN_RESCAN_INTERVAL_MS = 700L;
     private static final long CLICK_VERIFY_DELAY_MS = 750L;
-    private static final int MAX_COUNTDOWN_RESCANS = 24;
+    private static final int MAX_COUNTDOWN_RESCANS = 48;
     private static final int OCR_MAX_DIMENSION = 1280;
     private static final int MAX_NODES = 650;
     private static final int MAX_DEPTH = 14;
@@ -107,6 +107,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         koreanRecognizer = TextRecognition.getClient(new KoreanTextRecognizerOptions.Builder().build());
         devanagariRecognizer = TextRecognition.getClient(new DevanagariTextRecognizerOptions.Builder().build());
         floatingStatusOverlay.refresh(database, true, true);
+        logDiagnostic("", "SERVICE_CONNECTED", "无障碍服务已连接；等待用户启用并打开目标应用");
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
