@@ -994,6 +994,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                     OcrCandidate best = null;
                     int bestScore = 0;
+                    boolean allowCountdownClicks = isCountdownClickEnabled();
                     List<String> suppressedLabels = database == null
                             ? java.util.Collections.emptyList() : database.getSuppressedLabels(expectedPackage);
                     for (Text.TextBlock block : result.getTextBlocks()) {
@@ -1004,7 +1005,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                                     lineText, context, true, true, true, box.width(), box.height(),
                                     sourceWidth, sourceHeight,
-                                    isCountdownClickEnabled(), getMinimumSkipScore());
+                                    allowCountdownClicks, getMinimumSkipScore());
                             if (assessment.score >= getMinimumSkipScore() && assessment.score > bestScore) {
                                 best = new OcrCandidate(new Rect(box), lineText, assessment.score);
                                 bestScore = assessment.score;
