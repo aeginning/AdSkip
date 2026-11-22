@@ -186,8 +186,22 @@ public final class MainActivity extends Activity {
                 overlayCard, "显示 DNS 过滤状态", "floating_overlay_show_dns", true);
         android.widget.Switch overlayShowClicks = addOverlayPreferenceSwitch(
                 overlayCard, "显示近 24 小时自动点击次数", "floating_overlay_show_clicks", true);
+        android.widget.Switch overlayShowOcr = addOverlayPreferenceSwitch(
+                overlayCard, "显示 OCR 辅助识别状态", "floating_overlay_show_ocr", true);
+        android.widget.Switch overlayShowDnsRules = addOverlayPreferenceSwitch(
+                overlayCard, "显示当前 DNS 规则数量", "floating_overlay_show_dns_rules", true);
+        android.widget.Switch overlayShowSafetyBlocks = addOverlayPreferenceSwitch(
+                overlayCard, "显示近 24 小时安全拦截次数", "floating_overlay_show_safety_blocks", true);
+        android.widget.Switch overlayShowDnsBlocks = addOverlayPreferenceSwitch(
+                overlayCard, "显示近 24 小时 DNS 拦截次数", "floating_overlay_show_dns_blocks", true);
+        android.widget.Switch overlayShowNoAction = addOverlayPreferenceSwitch(
+                overlayCard, "显示近 24 小时未执行次数", "floating_overlay_show_no_action", false);
+        android.widget.Switch overlayShowErrors = addOverlayPreferenceSwitch(
+                overlayCard, "显示近 24 小时错误次数", "floating_overlay_show_errors", false);
         android.widget.Switch[] overlayOptions = {
-                overlayShowSkip, overlayShowApps, overlayShowDns, overlayShowClicks
+                overlayShowSkip, overlayShowApps, overlayShowDns, overlayShowClicks,
+                overlayShowOcr, overlayShowDnsRules, overlayShowSafetyBlocks, overlayShowDnsBlocks,
+                overlayShowNoAction, overlayShowErrors
         };
         Runnable syncOverlayOptions = () -> {
             boolean enabled = overlayMaster.isChecked();
@@ -204,6 +218,21 @@ public final class MainActivity extends Activity {
                 Toast.makeText(this, "状态悬浮窗已开启，可在其他应用上方查看。", Toast.LENGTH_SHORT).show();
             }
         });
+
+        addGap(overlayCard, 8);
+        TextView sizeHeading = label("悬浮窗尺寸自定义", 14, 0xFF344054, true);
+        overlayCard.addView(sizeHeading);
+        TextView sizeHint = label(
+                "默认已缩小；内容较多时可在悬浮窗内部上下滑动。宽度、高度和文字大小均可独立调整。",
+                11, 0xFF7A8495, false);
+        addGap(overlayCard, 3);
+        overlayCard.addView(sizeHint);
+        addOverlaySizeControl(overlayCard, "悬浮窗宽度", "floating_overlay_width_dp",
+                150, 320, 178, "dp");
+        addOverlaySizeControl(overlayCard, "悬浮窗高度", "floating_overlay_height_dp",
+                120, 460, 190, "dp");
+        addOverlaySizeControl(overlayCard, "悬浮窗文字大小", "floating_overlay_text_size_sp",
+                9, 16, 10, "sp");
 
         addGap(root, 14);
 
@@ -1208,6 +1237,34 @@ public final class MainActivity extends Activity {
     }
 
     @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
+    private void addOverlaySizeControl(LinearLayout parent, String title,
+                                       String preferenceKey, int min, int max,
+                                       int defaultValue, String unit) {
+        TextView valueLabel = label("", 12, 0xFF475467, true);
+        int saved = getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getInt(preferenceKey, defaultValue);
+        int initial = Math.max(min, Math.min(max, saved));
+        valueLabel.setText(title + "：" + initial + " " + unit);
+        addGap(parent, 5);
+        parent.addView(valueLabel);
+
+        SeekBar control = new SeekBar(this);
+        control.setMax(max - min);
+        control.setProgress(initial - min);
+        control.setContentDescription(title + "，" + min + " 到 " + max + " " + unit);
+        parent.addView(control, new LinearLayout.LayoutParams(-1, dp(38)));
+        control.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int value = min + progress;
+                valueLabel.setText(title + "：" + value + " " + unit);
+                if (fromUser) getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putInt(preferenceKey, value).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+    }
+
     private android.widget.Switch addOverlayPreferenceSwitch(
             LinearLayout parent, String labelText, String preferenceKey, boolean defaultValue) {
         android.widget.Switch option = new android.widget.Switch(this);
