@@ -57,8 +57,8 @@ public final class AdConfidenceScorer {
         int minimumHeight = closeGlyph ? 12 : 18;
         if (screenWidth <= 0 || screenHeight <= 0
                 || targetWidth < minimumWidth || targetHeight < minimumHeight
-                || targetWidth > screenWidth * (closeGlyph ? 0.16f : 0.65f)
-                || targetHeight > screenHeight * (closeGlyph ? 0.10f : 0.25f)) {
+                || targetWidth > screenWidth * (closeGlyph ? 0.22f : 0.65f)
+                || targetHeight > screenHeight * (closeGlyph ? 0.16f : 0.25f)) {
             return result(0, "目标尺寸不合理");
         }
 
