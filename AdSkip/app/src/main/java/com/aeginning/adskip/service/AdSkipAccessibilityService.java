@@ -24,6 +24,7 @@ import com.aeginning.adskip.engine.SensitiveInputPolicy;
 import com.aeginning.adskip.engine.SensitiveRegionPolicy;
 import com.aeginning.adskip.engine.DiagnosticLogThrottle;
 import com.aeginning.adskip.engine.TargetStability;
+import com.aeginning.adskip.engine.SplashProbePolicy;
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions;
@@ -668,6 +669,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
      * A launch can initially expose only a blank/loading frame. Probe for a short,
      * bounded interval so late-rendered splash ads are not missed by the 7s idle OCR cadence.
      */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void scheduleSplashProbe(String packageName, long generation) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || destroyed || database == null
                 || packageName == null || packageName.trim().isEmpty()
