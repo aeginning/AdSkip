@@ -34,6 +34,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** DNS-only VPN: routes only the synthetic DNS resolver address, not all device traffic. */
 public final class DnsFilterVpnService extends VpnService {
@@ -63,6 +64,7 @@ public final class DnsFilterVpnService extends VpnService {
                 }
             }, new ThreadPoolExecutor.AbortPolicy());
     private final Object tunWriteLock = new Object();
+    private final AtomicInteger upstreamCursor = new AtomicInteger();
     private final LinkedHashMap<String, Long> lastDomainLogAt =
             new LinkedHashMap<String, Long>(64, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
@@ -151,6 +153,9 @@ public final class DnsFilterVpnService extends VpnService {
             }
         } catch (Exception e) {
             if (running) {
+                running = false;
+                sRunning = false;
+                packetWorkers.shutdownNow();
                 database.log("VPN", "", "ERROR", "Packet loop: " + e.getClass().getSimpleName());
                 new Handler(Looper.getMainLooper()).post(() -> {
                     stopFiltering();
@@ -232,7 +237,10 @@ public final class DnsFilterVpnService extends VpnService {
     }
 
     private byte[] forwardDns(byte[] query) {
-        for (String server : UPSTREAM_DNS) {
+        int start = Math.floorMod(upstreamCursor.getAndIncrement(), UPSTREAM_DNS.length);
+        for (int offset = 0; offset < UPSTREAM_DNS.length; offset++) {
+            if (!running || Thread.currentThread().isInterrupted()) return null;
+            String server = UPSTREAM_DNS[(start + offset) % UPSTREAM_DNS.length];
             try {
                 InetAddress address = InetAddress.getByName(server);
                 byte[] response = forwardDnsUdp(query, address);
@@ -250,6 +258,7 @@ public final class DnsFilterVpnService extends VpnService {
     }
 
     private byte[] forwardDnsUdp(byte[] query, InetAddress address) {
+        if (!running || Thread.currentThread().isInterrupted()) return null;
         try (DatagramSocket socket = new DatagramSocket()) {
             if (!protect(socket)) return null;
             socket.setSoTimeout(1400);
@@ -267,6 +276,7 @@ public final class DnsFilterVpnService extends VpnService {
 
     /** RFC 7766 length-prefixed TCP retry for an upstream UDP response with TC=1. */
     private byte[] forwardDnsTcp(byte[] query, InetAddress address) {
+        if (!running || Thread.currentThread().isInterrupted()) return null;
         try (Socket socket = new Socket()) {
             if (!protect(socket)) return null;
             socket.connect(new InetSocketAddress(address, 53), 1400);
@@ -288,7 +298,6 @@ public final class DnsFilterVpnService extends VpnService {
         boolean wasActive = running || tunnel != null;
         running = false;
         sRunning = false;
-        packetWorkers.shutdownNow();
         getSharedPreferences("adskip_settings", MODE_PRIVATE).edit().putBoolean("dns_active", false).apply();
         if (tunnel != null) {
             try { tunnel.close(); } catch (Exception ignored) { }
@@ -306,6 +315,7 @@ public final class DnsFilterVpnService extends VpnService {
 
     @Override public void onDestroy() {
         stopFiltering();
+        packetWorkers.shutdownNow();
         worker.shutdownNow();
         if (database != null) database.close();
         super.onDestroy();
