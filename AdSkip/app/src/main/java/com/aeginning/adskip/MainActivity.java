@@ -355,9 +355,10 @@ public final class MainActivity extends Activity {
         List<RuleDatabase.DnsFeedInfo> feeds = database.getDnsFeeds();
         int enabledFeedCount = 0;
         for (RuleDatabase.DnsFeedInfo feed : feeds) if (feed.enabled) enabledFeedCount++;
-        domainRuleStatus.setText("当前生效规则约 " + activeDomainCount + " 条（手工 " + manualDomainCount
-                + " 条，订阅 " + enabledFeedCount + "/" + feeds.size() + " 个）。"
-                + (activeDomainCount == 0 ? "请先添加手工域名或下载规则库。" : "采用本地域名后缀匹配。"));
+        domainRuleStatus.setText(activeDomainCount == 0
+                ? getString(R.string.dns_status_empty, manualDomainCount, enabledFeedCount, feeds.size())
+                : getString(R.string.dns_status_summary, activeDomainCount, manualDomainCount,
+                        enabledFeedCount, feeds.size()));
         if (statsStatus != null) statsStatus.setText(database.getStats24h().toDisplayText());
         if (privilegeManager != null) updatePrivilegeStatus(privilegeManager.refresh().toDisplayText());
     }
