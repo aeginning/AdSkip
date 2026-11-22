@@ -466,9 +466,13 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         }
     }
 
+    /** Return only manually editable rules; large downloaded feeds are managed separately. */
     public synchronized List<String> getBlockedDomains() {
-        List<String> result = new ArrayList<>(getBlockedDomainSnapshot());
-        Collections.sort(result);
+        List<String> result = new ArrayList<>();
+        try (Cursor c = getReadableDatabase().query("domain_rules", new String[]{"domain"},
+                "enabled=1", null, null, null, "domain ASC")) {
+            while (c.moveToNext()) result.add(c.getString(0));
+        }
         return result;
     }
 
