@@ -24,6 +24,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -69,6 +70,7 @@ public final class MainActivity extends Activity {
         buildUi();
     }
 
+    @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -255,6 +257,106 @@ public final class MainActivity extends Activity {
                         .edit().putBoolean("ocr_enabled", checked).apply());
         addGap(ocrCard, 7);
         ocrCard.addView(ocrSwitch);
+
+        addGap(root, 14);
+
+        // Optional countdown clicking and configurable second-observation text similarity.
+        LinearLayout recognitionCard = card(root);
+        recognitionCard.addView(label("跳过识别设置", 18, 0xFF172033, true));
+        TextView recognitionHint = label(
+                "支持倒计时“跳过 + 数字”及广告右上角 X / × 关闭符号识别。灵敏度控制候选触发门槛；二次确认可按需关闭；相似度仅在二次确认开启时生效。",
+                12, 0xFF7A8495, false);
+        recognitionHint.setLineSpacing(dp(3), 1.0f);
+        addGap(recognitionCard, 5);
+        recognitionCard.addView(recognitionHint);
+
+        android.widget.Switch countdownClickSwitch = new android.widget.Switch(this);
+        countdownClickSwitch.setText("倒计时期间也尝试点击“跳过”");
+        countdownClickSwitch.setTextSize(14);
+        countdownClickSwitch.setTextColor(0xFF344054);
+        countdownClickSwitch.setPadding(0, dp(8), 0, dp(4));
+        countdownClickSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("countdown_click_enabled", false));
+        countdownClickSwitch.setOnCheckedChangeListener((buttonView, checked) ->
+                getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putBoolean("countdown_click_enabled", checked).apply());
+        addGap(recognitionCard, 6);
+        recognitionCard.addView(countdownClickSwitch);
+
+        android.widget.Switch secondConfirmationSwitch = new android.widget.Switch(this);
+        secondConfirmationSwitch.setText("启用二次识别确认（关闭后更快，但误触风险更高）");
+        secondConfirmationSwitch.setTextSize(14);
+        secondConfirmationSwitch.setTextColor(0xFF344054);
+        secondConfirmationSwitch.setPadding(0, dp(8), 0, dp(4));
+        secondConfirmationSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("second_confirmation_enabled", true));
+        secondConfirmationSwitch.setOnCheckedChangeListener((buttonView, checked) ->
+                getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putBoolean("second_confirmation_enabled", checked).apply());
+        addGap(recognitionCard, 4);
+        recognitionCard.addView(secondConfirmationSwitch);
+
+        TextView sensitivityLabel = label("", 13, 0xFF344054, true);
+        int savedSensitivity = getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getInt("skip_button_sensitivity", 50);
+        int initialSensitivity = Math.max(0, Math.min(100, savedSensitivity));
+        int initialMinimumScore = 90 - Math.round(initialSensitivity * 0.30f);
+        sensitivityLabel.setText(getString(R.string.skip_sensitivity_text,
+                initialSensitivity, initialMinimumScore));
+        addGap(recognitionCard, 9);
+        recognitionCard.addView(sensitivityLabel);
+
+        SeekBar sensitivitySeekBar = new SeekBar(this);
+        sensitivitySeekBar.setMax(100);
+        sensitivitySeekBar.setProgress(initialSensitivity);
+        sensitivitySeekBar.setContentDescription("跳过按钮灵敏度，0 到 100，数值越高越容易触发");
+        recognitionCard.addView(sensitivitySeekBar, new LinearLayout.LayoutParams(-1, dp(42)));
+        sensitivitySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int threshold = 90 - Math.round(progress * 0.30f);
+                sensitivityLabel.setText(getString(R.string.skip_sensitivity_text,
+                        progress, threshold));
+                if (fromUser) getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putInt("skip_button_sensitivity", progress).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+        TextView sensitivityHint = label(
+                "灵敏度越高，越容易接受普通“跳过”及 OCR 结果；越低越严格。无论如何，广告上下文、控件几何位置、危险操作屏蔽仍然生效。",
+                11, 0xFF7A8495, false);
+        addGap(recognitionCard, 3);
+        recognitionCard.addView(sensitivityHint);
+
+        TextView similarityLabel = label("", 13, 0xFF344054, true);
+        int savedSimilarity = getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getInt("recognition_similarity_percent", 85);
+        int initialSimilarity = Math.max(60, Math.min(100, savedSimilarity));
+        similarityLabel.setText(getString(R.string.recognition_similarity_text,
+                initialSimilarity));
+        addGap(recognitionCard, 8);
+        recognitionCard.addView(similarityLabel);
+
+        SeekBar similaritySeekBar = new SeekBar(this);
+        similaritySeekBar.setMax(40);
+        similaritySeekBar.setProgress(initialSimilarity - 60);
+        similaritySeekBar.setContentDescription("二次识别文字相似度，60% 到 100%");
+        recognitionCard.addView(similaritySeekBar, new LinearLayout.LayoutParams(-1, dp(42)));
+        similaritySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int value = 60 + progress;
+                similarityLabel.setText(getString(R.string.recognition_similarity_text, value));
+                if (fromUser) getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putInt("recognition_similarity_percent", value).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+        TextView similarityHint = label(
+                "建议 85%：调低更容易容忍 OCR 识别差异，但可能增加误匹配；调高更严格。范围 60%–100%。",
+                11, 0xFF7A8495, false);
+        addGap(recognitionCard, 3);
+        recognitionCard.addView(similarityHint);
 
         addGap(root, 14);
 

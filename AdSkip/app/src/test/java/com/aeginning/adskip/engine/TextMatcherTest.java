@@ -80,6 +80,46 @@ public class TextMatcherTest {
         assertTrue(confidence("跳过", "广告来源：趣盟") >= 75);
     }
 
+    @Test public void countdownSkipRequiresExplicitOptInAndAdContext() {
+        assertEquals(0, AdConfidenceScorer.assess("跳过 4", "广告来源：趣盟",
+                true, true, true, 80, 34, 1080, 2400).score);
+        assertTrue(AdConfidenceScorer.assess("跳过 4", "广告来源：趣盟",
+                true, true, true, 80, 34, 1080, 2400, true).score >= 75);
+        assertEquals(0, AdConfidenceScorer.assess("摇一摇 4", "广告来源：趣盟",
+                true, true, true, 80, 34, 1080, 2400, true).score);
+        assertEquals(0, AdConfidenceScorer.assess("跳过 4", "普通视频播放",
+                true, true, true, 80, 34, 1080, 2400, true).score);
+        assertEquals(0, AdConfidenceScorer.assess("跳过 4", "广告：立即购买",
+                true, true, true, 80, 34, 1080, 2400, true).score);
+    }
+
+    @Test public void similarityToleratesCountdownNumberChanges() {
+        assertTrue(TextMatcher.isCountdownSkipLabel("跳过 4"));
+        assertTrue(TextMatcher.isCountdownSkipLabel("Skip 3s"));
+        assertEquals(100, TextMatcher.similarityPercent("跳过 4", "跳过 3"));
+        assertEquals(100, TextMatcher.similarityPercent("Skip 4", "Skip 3s"));
+        assertTrue(TextMatcher.similarityPercent("Skip Ad", "Skip Ads") >= 85);
+        assertTrue(TextMatcher.similarityPercent("跳过广告", "跳过广吿") < 100);
+    }
+
+    @Test public void closeGlyphsAreExactAndNotGeneralLetterMatches() {
+        assertTrue(TextMatcher.isCloseGlyph("X"));
+        assertTrue(TextMatcher.isCloseGlyph("x"));
+        assertTrue(TextMatcher.isCloseGlyph("×"));
+        assertTrue(TextMatcher.isCloseGlyph("✕"));
+        assertFalse(TextMatcher.isCloseGlyph("X广告"));
+        assertFalse(TextMatcher.isCloseGlyph("下一步 X"));
+        assertFalse(TextMatcher.isCloseGlyph("关闭"));
+    }
+
+    @Test public void sensitivityMappingIsMonotonic() {
+        assertEquals(90, AdConfidenceScorer.minimumScoreForSensitivity(0));
+        assertEquals(75, AdConfidenceScorer.minimumScoreForSensitivity(50));
+        assertEquals(60, AdConfidenceScorer.minimumScoreForSensitivity(100));
+        assertEquals(90, AdConfidenceScorer.minimumScoreForSensitivity(-20));
+        assertEquals(60, AdConfidenceScorer.minimumScoreForSensitivity(120));
+    }
+
     @Test public void normalizesFullWidthAndZeroWidthAdLabels() {
         assertTrue(TextMatcher.isCountdown("Ｓｋｉｐ ３"));
         assertTrue(TextMatcher.isCountdown("跳过\u200B 3"));

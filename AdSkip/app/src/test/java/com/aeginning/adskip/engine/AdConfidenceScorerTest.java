@@ -51,6 +51,39 @@ public class AdConfidenceScorerTest {
         assertEquals(0, result.score);
     }
 
+    @Test public void XGlyphOnlyQualifiesWithAdContext() {
+        AdConfidenceScorer.Assessment adX = AdConfidenceScorer.assess(
+                "X", "广告来源：趣盟", true, true, true, 40, 36, 1080, 2400);
+        AdConfidenceScorer.Assessment normalX = AdConfidenceScorer.assess(
+                "X", "Settings and account", true, true, true, 40, 36, 1080, 2400);
+        assertTrue(adX.score >= 90);
+        assertEquals(0, normalX.score);
+    }
+
+    @Test public void higherSensitivityAllowsLowerConfidenceSkipCandidates() {
+        AdConfidenceScorer.Assessment strict = AdConfidenceScorer.assess(
+                "跳过", "广告来源：趣盟", true, true, true, 80, 34, 1080, 2400,
+                false, AdConfidenceScorer.minimumScoreForSensitivity(0));
+        AdConfidenceScorer.Assessment permissive = AdConfidenceScorer.assess(
+                "跳过", "广告来源：趣盟", true, true, true, 80, 34, 1080, 2400,
+                false, AdConfidenceScorer.minimumScoreForSensitivity(100));
+        assertEquals(0, strict.score);
+        assertTrue(permissive.score >= 60);
+    }
+
+    @Test public void smallXGlyphCanPassScoringWithAdContext() {
+        AdConfidenceScorer.Assessment result = AdConfidenceScorer.assess(
+                "X", "广告来源：趣盟", true, true, true, 14, 14, 1080, 2400);
+        assertTrue(result.score >= 90);
+    }
+
+    @Test public void XGlyphCanBeDetectedWhenCountdownTextAppearsElsewhere() {
+        AdConfidenceScorer.Assessment result = AdConfidenceScorer.assess(
+                "×", "广告来源：趣盟 · 跳过 4", true, true, true, 40, 36, 1080, 2400,
+                false, 75);
+        assertTrue(result.score >= 75);
+    }
+
     @Test public void twoObservationsMustBeConsistent() {
         AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                 94, AdConfidenceScorer.Level.HIGH, "first");
