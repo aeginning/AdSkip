@@ -1003,109 +1003,35 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 Math.max(1, Math.round(height * scale)), true);
     }
 
-    private void runRecognizers(Bitmap bitmap, String expectedPackage, long generation) {
-        runOcrPass(bitmap, expectedPackage, generation, false);
-    }
 
-    /**
-     * Try the recognizer matching the device language first, then the other on-device
-     * model when no safe skip candidate was found. The same downscaled bitmap is reused
-     * sequentially, never processed concurrently, and is recycled exactly once.
-     */
-    private void runOcrPass(Bitmap bitmap, String expectedPackage, long generation, boolean alternate) {
-        final int sourceWidth = bitmap.getWidth();
-        final int sourceHeight = bitmap.getHeight();
-        boolean chineseLocale = java.util.Locale.getDefault().getLanguage().startsWith("zh");
-        TextRecognizer recognizer = alternate
-                ? (chineseLocale ? latinRecognizer : chineseRecognizer)
-                : (chineseLocale ? chineseRecognizer : latinRecognizer);
-        if (recognizer == null) {
-            if (!bitmap.isRecycled()) bitmap.recycle();
-            ocrInFlight = false;
-            return;
-        }
-
-        try {
-            InputImage image = InputImage.fromBitmap(bitmap, 0);
-            Task<Text> task = recognizer.process(image);
-            task.addOnCompleteListener(completed -> {
-                boolean handedToFallback = false;
-                try {
-                    if (destroyed || !completed.isSuccessful() || completed.getResult() == null) {
-                        if (!alternate && !destroyed) {
-                            handedToFallback = true;
-                            runOcrPass(bitmap, expectedPackage, generation, true);
-                        }
-                        return;
-                    }
-
-                    Text result = completed.getResult();
-                    String context = result.getText();
-                    boolean allowCountdownClicks = isCountdownClickEnabled();
-                    if (TextMatcher.isCountdown(context)) {
-                        mainHandler.post(() -> scheduleCountdownRescan(expectedPackage, generation));
-                        // Continue scanning the frame for a distinct X close affordance.
-                        // The scorer rejects countdown labels unless their toggle is enabled.
-                    } else {
-                        // OCR confirms that the visual countdown is gone; stop the bounded poll loop.
-                        mainHandler.post(this::cancelPendingCountdownRescan);
-                    }
-
-                    OcrCandidate best = null;
-                    int bestScore = 0;
-                    List<String> suppressedLabels = database == null
-                            ? java.util.Collections.emptyList() : database.getSuppressedLabels(expectedPackage);
-                    for (Text.TextBlock block : result.getTextBlocks()) {
-                        for (Text.Line line : block.getLines()) {
-                            String lineText = line.getText();
-                            Rect box = line.getBoundingBox();
-                            if (box == null || isSuppressedLabel(suppressedLabels, lineText)) continue;
-                            AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
-                                    lineText, context, true, true, true, box.width(), box.height(),
-                                    bitmap.getWidth(), bitmap.getHeight(),
-                                    allowCountdownClicks, getMinimumSkipScore());
-                            if (assessment.score >= getMinimumSkipScore()
-                                    && assessment.score > bestScore) {
-                                best = new OcrCandidate(new Rect(box), lineText, assessment.score);
-                                bestScore = assessment.score;
-                            }
-                        }
-                    }
-
-                    if (best == null && !alternate && !destroyed) {
-                        // Chinese ads can appear on English-system devices and vice versa.
-                        handedToFallback = true;
-                        runOcrPass(bitmap, expectedPackage, generation, true);
-                        return;
-                    }
-
-                    if (best != null) {
-                        OcrCandidate selected = best;
-                        mainHandler.post(() -> executeOcrCandidate(selected, context, sourceWidth,
-                                sourceHeight, expectedPackage, generation));
-                    }
-                } catch (Throwable ignored) {
-                } finally {
-                    if (!handedToFallback) {
-                        if (!bitmap.isRecycled()) bitmap.recycle();
-                        ocrInFlight = false;
-                    }
-                }
-            });
-        } catch (Throwable failure) {
-            if (!bitmap.isRecycled()) bitmap.recycle();
-            ocrInFlight = false;
-        }
-    }
 
     private void executeOcrCandidate(OcrCandidate candidate, String context, int bitmapWidth, int bitmapHeight,
                                      String expectedPackage, long generation) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || !isOcrEnabled()
-                || !isActiveWindowSafeForTarget(expectedPackage, generation)
-                || database == null || !database.isAppEnabled(expectedPackage)
-                || database.isLabelSuppressed(expectedPackage, candidate.label)) return;
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastClickAt < CLICK_COOLDOWN_MS) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            logDiagnostic(expectedPackage, "OCR_UNAVAILABLE", "Android 11 以下不支持当前截图 OCR 路径");
+            return;
+        }
+        if (!isOcrEnabled()) {
+            logDiagnostic(expectedPackage, "OCR_DISABLED", "OCR 辅助识别已关闭");
+            return;
+        }
+        if (!isActiveWindowSafeForTarget(expectedPackage, generation)) {
+            logDiagnostic(expectedPackage, "OCR_STALE_WINDOW", "OCR 完成时窗口已变化或出现敏感输入区域");
+            return;
+        }
+        if (database == null || !database.isAppEnabled(expectedPackage)) {
+            logDiagnostic(expectedPackage, "OCR_APP_DISABLED", "OCR 完成时目标应用自动化已关闭");
+            return;
+        }
+        if (database.isLabelSuppressed(expectedPackage, candidate.label)) {
+            logDiagnostic(expectedPackage, "OCR_SUPPRESSED", "候选命中用户设置的误判屏蔽规则");
+            return;
+        }
+        if (SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
+            logDiagnostic(expectedPackage, "CLICK_COOLDOWN", "OCR 候选命中点击冷却期，未执行点击");
+            return;
+        }
+
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
         int minimumScore = getMinimumSkipScore();
@@ -1123,28 +1049,41 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 true, true, true, candidate.label, context,
                 isCountdownClickEnabled(), minimumScore)) {
             database.log(expectedPackage, safeLogLabel(candidate.label), "BLOCKED",
-                    "OCR 置信度、灵敏度门槛或安全审核未通过");
+                    "OCR 候选未通过置信度门槛或最终安全审核；未执行点击");
+            logDiagnostic(expectedPackage, "OCR_BLOCKED",
+                    "OCR 候选被安全策略拒绝，原因：" + assessment.reason);
             return;
         }
 
         if (!isSecondConfirmationEnabled()) {
-            if (generation == windowGeneration && isOcrEnabled()
-                    && database != null && database.isAppEnabled(expectedPackage)
-                    && !database.isLabelSuppressed(expectedPackage, candidate.label)
-                    && isActiveWindowSafeForTarget(expectedPackage, generation)
-                    && SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
-                            true, true, true, candidate.label, context,
-                            isCountdownClickEnabled(), minimumScore)
-                    && SystemClock.elapsedRealtime() - lastClickAt >= CLICK_COOLDOWN_MS
-                    && dispatchTap(mapped.centerX(), mapped.centerY())) {
+            if (!isActiveWindowSafeForTarget(expectedPackage, generation)
+                    || !database.isAppEnabled(expectedPackage)
+                    || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
+                logDiagnostic(expectedPackage, "OCR_REVALIDATION_FAILED",
+                        "单次 OCR 模式执行前，目标窗口、应用规则或冷却条件发生变化");
+                return;
+            }
+            if (dispatchTap(mapped.centerX(), mapped.centerY(), expectedPackage)) {
                 lastClickAt = SystemClock.elapsedRealtime();
                 database.log(expectedPackage, safeLogLabel(candidate.label), "CLICK",
-                        "用户关闭二次确认；单次 OCR 观察；灵敏度="
-                                + getSkipButtonSensitivity() + "；置信度=" + assessment.score);
+                        "用户关闭二次确认；单次 OCR 观察；置信度=" + assessment.score
+                                + "；系统已接受手势请求");
+                logDiagnostic(expectedPackage, "CLICK_DISPATCHED",
+                        "单次 OCR 手势已派发；将在延迟后验证按钮状态");
+                cancelPendingCountdownRescan();
+                scheduleClickVerification(expectedPackage, candidate.label, mapped, "OCR");
                 refreshFloatingOverlay(true);
+            } else {
+                database.log(expectedPackage, safeLogLabel(candidate.label), "NO_ACTION",
+                        "OCR 候选通过安全审核，但 Android 未接受坐标手势");
+                logDiagnostic(expectedPackage, "OCR_GESTURE_REJECTED",
+                        "OCR 点击位置通过安全审核，但系统拒绝手势派发");
             }
             return;
         }
+
+        logDiagnostic(expectedPackage, "OCR_CONFIRM_START",
+                "OCR 候选通过安全审核，准备第二次截图确认");
         confirmOcrCandidate(candidate.label, mapped, expectedPackage, generation, assessment.score);
     }
 
