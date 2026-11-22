@@ -74,6 +74,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private long lastOcrAt;
     private volatile boolean ocrInFlight;
     private volatile boolean hasSensitiveInputInCurrentWindow;
+    private final List<Rect> sensitiveInputBounds = new ArrayList<>();
+    private boolean sensitiveInputBoundsUnknown;
     private volatile long windowGeneration;
     private volatile boolean destroyed;
     private boolean nodeScanIncomplete;
@@ -165,6 +167,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return;
         }
         hasSensitiveInputInCurrentWindow = false;
+        sensitiveInputBounds.clear();
+        sensitiveInputBoundsUnknown = false;
         nodeScanIncomplete = false;
         if (root == null) {
             logDiagnostic(pkg, "NO_WINDOW", "Android 未提供活动窗口节点；可能是安全窗口、切换动画或应用限制");
@@ -185,8 +189,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             collectNodes(root, 0, nodes, screenText);
             if (hasSensitiveInputInCurrentWindow) {
                 logDiagnostic(pkg, "SENSITIVE_INPUT",
-                        "发现密码、支付码或验证码输入区域；不读取输入内容，并暂停本窗口自动点击与截图 OCR");
-                return;
+                        "已标记密码、支付码或验证码输入区域；该区域及邻近区域不参与节点点击，整屏 OCR 截图关闭");
             }
             if (nodeScanIncomplete) {
                 logDiagnostic(pkg, "SCAN_INCOMPLETE",
@@ -237,7 +240,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         boolean editable = node.isEditable();
         boolean sensitive = SensitiveInputPolicy.isSensitive(password, editable,
                 node.getInputType(), node.getHintText(), node.getContentDescription());
-        if (sensitive) hasSensitiveInputInCurrentWindow = true;
+        if (sensitive) {
+            hasSensitiveInputInCurrentWindow = true;
+            Rect sensitiveBounds = new Rect();
+            node.getBoundsInScreen(sensitiveBounds);
+            if (sensitiveBounds.isEmpty()) {
+                sensitiveInputBoundsUnknown = true;
+            } else {
+                sensitiveInputBounds.add(sensitiveBounds);
+            }
+        }
 
         // Never read text values from any editable field. A normal search box is not,
         // however, a reason to suppress scanning of unrelated buttons elsewhere.
@@ -281,6 +293,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         int suppressed = 0;
         int lowConfidence = 0;
         int unsafe = 0;
+        int sensitiveRegionRejected = 0;
         String firstRejection = "";
         List<String> suppressedLabels = database == null
                 ? java.util.Collections.emptyList() : database.getSuppressedLabels(packageName);
@@ -306,6 +319,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 AccessibilityNodeInfo clickable = target.node;
                 Rect bounds = new Rect();
                 clickable.getBoundsInScreen(bounds);
+                if (overlapsCurrentSensitiveRegion(bounds)) {
+                    sensitiveRegionRejected++;
+                    if (firstRejection.isEmpty()) firstRejection = "候选控件与密码/支付/验证码敏感区域或其邻近范围重叠";
+                    continue;
+                }
                 int width = getResources().getDisplayMetrics().widthPixels;
                 int height = getResources().getDisplayMetrics().heightPixels;
                 AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(label, context,
@@ -338,7 +356,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (best == null) {
             lastCandidateDecisionReason = "扫描可见节点 " + inspected + " 个：空标签 " + emptyLabels
                     + "，无可点击父控件 " + noClickableAncestor + "，用户屏蔽 " + suppressed
-                    + "，置信度不足 " + lowConfidence + "，安全策略拒绝 " + unsafe
+                    + "，置信度不足 " + lowConfidence + "，敏感区域排除 " + sensitiveRegionRejected
+                    + "，安全策略拒绝 " + unsafe
                     + (firstRejection.isEmpty() ? "；未发现明确的广告跳过/关闭控件" : "；首个拒绝原因：" + firstRejection);
         } else {
             lastCandidateDecisionReason = "发现候选控件，置信度=" + bestScore;
@@ -391,6 +410,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 return;
             }
             hasSensitiveInputInCurrentWindow = false;
+            sensitiveInputBounds.clear();
+            sensitiveInputBoundsUnknown = false;
             nodeScanIncomplete = false;
             List<AccessibilityNodeInfo> nodes = new ArrayList<>();
             Candidate second = null;
@@ -399,8 +420,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 collectNodes(root, 0, nodes, text);
                 if (hasSensitiveInputInCurrentWindow) {
                     logDiagnostic(packageName, "CONFIRM_SENSITIVE_INPUT",
-                            "二次确认时出现敏感输入区域，已取消点击");
-                    return;
+                            "二次扫描发现敏感区域；会避开该区域，只允许其它区域的候选继续复核");
                 }
                 if (nodeScanIncomplete) {
                     logDiagnostic(packageName, "CONFIRM_SCAN_INCOMPLETE",
@@ -526,6 +546,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
 
             hasSensitiveInputInCurrentWindow = false;
+            sensitiveInputBounds.clear();
+            sensitiveInputBoundsUnknown = false;
             nodeScanIncomplete = false;
             List<AccessibilityNodeInfo> nodes = new ArrayList<>();
             Candidate candidate = null;
@@ -534,8 +556,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 collectNodes(root, 0, nodes, screenText);
                 if (hasSensitiveInputInCurrentWindow) {
                     logDiagnostic(packageName, "COUNTDOWN_SENSITIVE_INPUT",
-                            "倒计时窗口出现敏感输入区域，停止截图和自动点击");
-                    return;
+                            "倒计时窗口包含敏感输入区域；停止整屏 OCR，并仅扫描该区域之外的安全控件");
                 }
                 if (nodeScanIncomplete) {
                     logDiagnostic(packageName, "COUNTDOWN_SCAN_INCOMPLETE",
@@ -650,9 +671,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                        long generation) {
         if (destroyed || generation != windowGeneration || database == null
                 || !database.isAppEnabled(packageName)
-                || !isActiveWindowSafeForTarget(packageName, generation)) {
+                || !isNodeTargetSafe(packageName, generation, candidate.bounds)) {
             logDiagnostic(packageName, "CLICK_REVALIDATION_FAILED",
-                    "点击前应用开关、前台窗口或敏感输入保护未通过；候选已作废");
+                    "点击前应用开关、前台窗口、敏感区域避让或控件树完整性未通过；候选已作废");
             return;
         }
         long now = SystemClock.elapsedRealtime();
@@ -714,6 +735,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
 
             hasSensitiveInputInCurrentWindow = false;
+            sensitiveInputBounds.clear();
+            sensitiveInputBoundsUnknown = false;
             nodeScanIncomplete = false;
             List<AccessibilityNodeInfo> nodes = new ArrayList<>();
             try {
@@ -1436,6 +1459,83 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private boolean isNodeTargetSafe(String expectedPackage, long generation, Rect targetBounds) {
+        if (destroyed || generation != windowGeneration || targetBounds == null) {
+            logDiagnostic(expectedPackage, "WINDOW_STALE", "节点候选复核时窗口代次已失效或目标区域为空");
+            return false;
+        }
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) {
+            logDiagnostic(expectedPackage, "NO_WINDOW", "节点点击前复核时无法读取活动窗口");
+            return false;
+        }
+        try {
+            CharSequence rootPackage = root.getPackageName();
+            if (generation != windowGeneration || rootPackage == null
+                    || !expectedPackage.contentEquals(rootPackage)) {
+                logDiagnostic(expectedPackage, "WINDOW_MISMATCH", "节点点击前复核发现前台应用已切换");
+                return false;
+            }
+            List<Rect> regions = new ArrayList<>();
+            boolean[] unknown = new boolean[]{false};
+            collectSensitiveInputRegions(root, 0, new int[]{0}, regions, unknown);
+            if (unknown[0]) {
+                logDiagnostic(expectedPackage, "SENSITIVE_REGION_UNKNOWN",
+                        "无法完整读取敏感输入区域边界；为避免误触，本次节点点击已阻止");
+                return false;
+            }
+            if (overlapsSensitiveRegion(targetBounds, regions, false)) {
+                logDiagnostic(expectedPackage, "CLICK_SENSITIVE_REGION",
+                        "候选位置与密码、支付或验证码区域重叠/过近，已阻止点击");
+                return false;
+            }
+            return true;
+        } finally {
+            recycleNode(root);
+        }
+    }
+
+    private void collectSensitiveInputRegions(AccessibilityNodeInfo node, int depth,
+                                              int[] visited, List<Rect> regions,
+                                              boolean[] unknown) {
+        if (node == null || unknown[0]) return;
+        if (depth > MAX_DEPTH || ++visited[0] > MAX_NODES) {
+            unknown[0] = true;
+            return;
+        }
+        if (node.isVisibleToUser() && SensitiveInputPolicy.isSensitive(
+                node.isPassword(), node.isEditable(), node.getInputType(),
+                node.getHintText(), node.getContentDescription())) {
+            Rect bounds = new Rect();
+            node.getBoundsInScreen(bounds);
+            if (bounds.isEmpty()) unknown[0] = true;
+            else regions.add(bounds);
+        }
+        for (int i = 0; i < node.getChildCount() && !unknown[0]; i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child == null) continue;
+            try {
+                collectSensitiveInputRegions(child, depth + 1, visited, regions, unknown);
+            } finally {
+                recycleNode(child);
+            }
+        }
+    }
+
+    private boolean overlapsCurrentSensitiveRegion(Rect target) {
+        return overlapsSensitiveRegion(target, sensitiveInputBounds, sensitiveInputBoundsUnknown);
+    }
+
+    private boolean overlapsSensitiveRegion(Rect target, List<Rect> regions, boolean unknown) {
+        if (target == null || unknown) return true;
+        for (Rect region : regions) {
+            Rect protectedBounds = new Rect(region);
+            protectedBounds.inset(-dp(24), -dp(18));
+            if (Rect.intersects(target, protectedBounds)) return true;
+        }
+        return false;
     }
 
     private boolean isActiveWindowSafeForTarget(String expectedPackage, long generation) {
