@@ -360,7 +360,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return;
         }
         String signature = packageName + "|" + TextMatcher.normalize(first.label);
-        if (signature.equals(pendingNodeSignature)) return;
+        if (signature.equals(pendingNodeSignature)) {
+            logDiagnostic(packageName, "CONFIRM_PENDING", "同一候选控件已在等待二次观察，忽略重复确认请求");
+            return;
+        }
         cancelPendingNodeConfirmation();
         pendingNodeSignature = signature;
         final Rect initialBounds = new Rect(first.bounds);
@@ -369,12 +372,20 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         pendingNodeConfirmation = () -> {
             pendingNodeConfirmation = null;
             pendingNodeSignature = null;
-            if (destroyed || database == null || generation != windowGeneration || !database.isAppEnabled(packageName)) return;
+            if (destroyed || database == null || generation != windowGeneration
+                    || !database.isAppEnabled(packageName)) {
+                logDiagnostic(packageName, "CONFIRM_ABORTED", "二次确认期间窗口或应用状态已变化");
+                return;
+            }
             AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root == null) return;
+            if (root == null) {
+                logDiagnostic(packageName, "CONFIRM_NO_WINDOW", "二次确认时无法重新读取活动窗口");
+                return;
+            }
             CharSequence rootPackage = root.getPackageName();
             if (rootPackage == null || !packageName.contentEquals(rootPackage)) {
                 recycleNode(root);
+                logDiagnostic(packageName, "CONFIRM_WINDOW_MISMATCH", "二次确认时活动窗口已切换");
                 return;
             }
             hasSensitiveInputInCurrentWindow = false;
@@ -384,14 +395,33 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             try {
                 StringBuilder text = new StringBuilder();
                 collectNodes(root, 0, nodes, text);
-                if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
+                if (hasSensitiveInputInCurrentWindow) {
+                    logDiagnostic(packageName, "CONFIRM_SENSITIVE_INPUT",
+                            "二次确认时出现敏感输入区域，已取消点击");
+                    return;
+                }
+                if (nodeScanIncomplete) {
+                    logDiagnostic(packageName, "CONFIRM_SCAN_INCOMPLETE",
+                            "二次确认控件树不完整，已取消点击");
+                    return;
+                }
                 String secondContext = text.toString();
                 second = chooseCandidate(nodes, secondContext, packageName);
-                if (second == null) return;
+                if (second == null) {
+                    logDiagnostic(packageName, "CONFIRM_NO_CANDIDATE",
+                            "二次观察未找到同类安全候选：" + lastCandidateDecisionReason);
+                    if (countdownRescanPackage != null) scheduleCountdownRescan(packageName, generation);
+                    return;
+                }
+
                 boolean sameLabel = TextMatcher.similarityPercent(initialLabel, second.label)
                         >= getSimilarityThreshold();
-                boolean sameArea = Math.abs(initialBounds.centerX() - second.bounds.centerX()) <= 48
-                        && Math.abs(initialBounds.centerY() - second.bounds.centerY()) <= 48;
+                int screenWidth = getResources().getDisplayMetrics().widthPixels;
+                int screenHeight = getResources().getDisplayMetrics().heightPixels;
+                boolean sameArea = TargetStability.areBoundsConsistent(
+                        initialBounds.left, initialBounds.top, initialBounds.right, initialBounds.bottom,
+                        second.bounds.left, second.bounds.top, second.bounds.right, second.bounds.bottom,
+                        screenWidth, screenHeight, dp(28), dp(72));
                 int minimumScore = getMinimumSkipScore();
                 AdConfidenceScorer.Assessment firstAssessment = new AdConfidenceScorer.Assessment(
                         initialScore, initialScore >= 90 ? AdConfidenceScorer.Level.HIGH
@@ -399,42 +429,28 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 AdConfidenceScorer.Assessment secondAssessment = AdConfidenceScorer.assess(second.label,
                         secondContext, second.node.isClickable(), second.node.isEnabled(),
                         second.node.isVisibleToUser(), second.bounds.width(), second.bounds.height(),
-                        getResources().getDisplayMetrics().widthPixels,
-                        getResources().getDisplayMetrics().heightPixels,
-                        isCountdownClickEnabled(), minimumScore);
+                        screenWidth, screenHeight, isCountdownClickEnabled(), minimumScore);
                 if (!sameLabel || !sameArea
                         || !AdConfidenceScorer.canProceedAfterSecondObservation(
                                 firstAssessment, secondAssessment, minimumScore)) {
+                    logDiagnostic(packageName, "CONFIRM_BLOCKED",
+                            "二次确认未通过：文字相似=" + sameLabel + "，位置一致=" + sameArea
+                                    + "，首次分数=" + initialScore + "，复核分数=" + secondAssessment.score);
                     database.log(packageName, safeLogLabel(initialLabel), "BLOCKED",
-                            "二次识别相似度低于 " + getSimilarityThreshold()
-                                    + "%、位置不一致或置信度不足");
+                            "二次观察的文字、位置或置信度不一致；未执行点击");
+                    if (countdownRescanPackage != null) scheduleCountdownRescan(packageName, generation);
                     return;
                 }
+                logDiagnostic(packageName, "CONFIRM_PASSED", "文字相似度、动态位置容差和二次置信度均通过");
                 executeNodeCandidate(second, packageName, secondContext);
+            } catch (Throwable failure) {
+                logDiagnostic(packageName, "CONFIRM_ERROR", "二次确认异常：" + failure.getClass().getSimpleName());
             } finally {
                 if (second != null && second.ownsNode) recycleNode(second.node);
                 recycleNodes(nodes);
             }
         };
         mainHandler.postDelayed(pendingNodeConfirmation, CLICK_CONFIRM_DELAY_MS);
-    }
-
-    private void logDiagnostic(String packageName, String action, String reason) {
-        if (destroyed || database == null || action == null) return;
-        String safePackage = packageName == null ? "" : packageName;
-        long interval = "SCAN".equals(action) ? 4_000L
-                : ("SCAN_THROTTLED".equals(action) ? 5_000L : 1_200L);
-        if (!diagnosticThrottle.shouldLog(safePackage + "|" + action,
-                SystemClock.elapsedRealtime(), interval)) return;
-        String safeReason = reason == null ? "" : reason.trim();
-        if (safeReason.length() > 220) safeReason = safeReason.substring(0, 220);
-        try {
-            // The diagnostic log stores only package, event code and generic reason.
-            // No screen OCR text, editable values, notifications or raw candidate labels.
-            database.log(safePackage, "诊断", action, safeReason);
-        } catch (RuntimeException ignored) {
-            // A diagnostic failure must never crash the accessibility service.
-        }
     }
 
     private void cancelPendingNodeConfirmation() {
@@ -456,18 +472,33 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             countdownRescanPackage = packageName;
             countdownRescanAttempts = 0;
         }
-        if (pendingCountdownRescan != null || countdownRescanAttempts >= MAX_COUNTDOWN_RESCANS) return;
+        if (pendingCountdownRescan != null) return;
+        if (countdownRescanAttempts >= MAX_COUNTDOWN_RESCANS) {
+            logDiagnostic(packageName, "COUNTDOWN_TIMEOUT",
+                    "主动扫描达到 " + MAX_COUNTDOWN_RESCANS + " 次上限，未发现可安全点击按钮；未执行点击");
+            countdownRescanPackage = null;
+            countdownRescanAttempts = 0;
+            return;
+        }
         countdownRescanAttempts++;
         pendingCountdownRescan = () -> {
             pendingCountdownRescan = null;
             if (destroyed || database == null || generation != windowGeneration
-                    || !database.isAppEnabled(packageName)) return;
+                    || !database.isAppEnabled(packageName)) {
+                logDiagnostic(packageName, "COUNTDOWN_CANCELLED", "主动扫描期间应用或窗口状态发生变化");
+                return;
+            }
 
             AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root == null) return;
+            if (root == null) {
+                logDiagnostic(packageName, "COUNTDOWN_NO_WINDOW", "倒计时主动扫描时暂时无法读取活动窗口");
+                scheduleCountdownRescan(packageName, generation);
+                return;
+            }
             CharSequence rootPackage = root.getPackageName();
             if (rootPackage == null || !packageName.contentEquals(rootPackage)) {
                 recycleNode(root);
+                logDiagnostic(packageName, "COUNTDOWN_WINDOW_MISMATCH", "倒计时扫描目标窗口已切换");
                 return;
             }
 
@@ -478,23 +509,43 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             try {
                 StringBuilder screenText = new StringBuilder();
                 collectNodes(root, 0, nodes, screenText);
-                if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
+                if (hasSensitiveInputInCurrentWindow) {
+                    logDiagnostic(packageName, "COUNTDOWN_SENSITIVE_INPUT",
+                            "倒计时窗口出现敏感输入区域，停止截图和自动点击");
+                    return;
+                }
+                if (nodeScanIncomplete) {
+                    logDiagnostic(packageName, "COUNTDOWN_SCAN_INCOMPLETE",
+                            "倒计时主动扫描的控件树不完整，本轮不点击");
+                    scheduleCountdownRescan(packageName, generation);
+                    return;
+                }
 
                 String context = screenText.toString();
                 candidate = chooseCandidate(nodes, context, packageName);
                 if (candidate != null) {
+                    logDiagnostic(packageName, "COUNTDOWN_READY",
+                            "主动扫描已发现可用跳过候选，进入二次确认");
                     scheduleNodeConfirmation(candidate, packageName, generation, context);
-                    countdownRescanAttempts = 0;
-                } else if (TextMatcher.isCountdown(context)) {
-                    scheduleCountdownRescan(packageName, generation);
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    // The timer may exist only in pixels, not in the accessibility tree.
-                    // Keep the bounded attempt count until OCR confirms the countdown ended.
-                    maybeRunOcr(packageName, TextMatcher.hasAdContext(context), true, generation);
                 } else {
-                    countdownRescanAttempts = 0;
-                    countdownRescanPackage = null;
+                    if (TextMatcher.isCountdown(context)) {
+                        logDiagnostic(packageName, "COUNTDOWN_WAIT",
+                                "倒计时仍在显示；继续等待并主动重新扫描");
+                    } else {
+                        logDiagnostic(packageName, "COUNTDOWN_ENDED",
+                                "控件树中的倒计时已消失；立即进行 OCR 并继续短间隔检查按钮");
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        // The countdown may be gone from the tree while the ad close/skip
+                        // control is rendered only in pixels.
+                        maybeRunOcr(packageName, true, true, generation, context);
+                    }
+                    scheduleCountdownRescan(packageName, generation);
                 }
+            } catch (Throwable failure) {
+                logDiagnostic(packageName, "COUNTDOWN_SCAN_ERROR",
+                        "倒计时主动扫描异常：" + failure.getClass().getSimpleName());
+                scheduleCountdownRescan(packageName, generation);
             } finally {
                 if (candidate != null && candidate.ownsNode) recycleNode(candidate.node);
                 recycleNodes(nodes);
@@ -555,29 +606,106 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void executeNodeCandidate(Candidate candidate, String packageName, String context) {
         long now = SystemClock.elapsedRealtime();
-        if (now - lastClickAt < CLICK_COOLDOWN_MS) return;
+        if (now - lastClickAt < CLICK_COOLDOWN_MS) {
+            logDiagnostic(packageName, "CLICK_COOLDOWN", "距离上一次点击不足冷却时间；本次候选未执行");
+            return;
+        }
         int minimumScore = getMinimumSkipScore();
         if (!SafetyPolicy.isSafeTarget(candidate.bounds,
                 getResources().getDisplayMetrics().widthPixels,
                 getResources().getDisplayMetrics().heightPixels,
                 candidate.node.isClickable(), candidate.node.isEnabled(), candidate.node.isVisibleToUser(),
                 candidate.label, context, isCountdownClickEnabled(), minimumScore)) {
-            database.log(packageName, safeLogLabel(candidate.label), "BLOCKED", "SafetyPolicy rejected node candidate");
+            database.log(packageName, safeLogLabel(candidate.label), "BLOCKED",
+                    "最终安全策略拒绝控件树候选；未执行点击");
+            logDiagnostic(packageName, "CLICK_BLOCKED",
+                    "候选未通过最终安全策略：高风险词、广告上下文或位置区域不符合要求");
             return;
         }
 
         boolean clicked = candidate.node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-        if (!clicked) clicked = dispatchTap(candidate.bounds.centerX(), candidate.bounds.centerY());
+        if (!clicked) clicked = dispatchTap(candidate.bounds.centerX(), candidate.bounds.centerY(), packageName);
         if (clicked) {
             lastClickAt = now;
             database.log(packageName, safeLogLabel(candidate.label), "CLICK",
                     (isSecondConfirmationEnabled() ? "二次确认后" : "用户关闭二次确认；单次观察")
                             + "识别通过；灵敏度=" + getSkipButtonSensitivity()
-                            + "；最低分=" + minimumScore);
+                            + "；最低分=" + minimumScore + "；系统已接受点击请求");
+            logDiagnostic(packageName, "CLICK_DISPATCHED",
+                    "系统已接受点击请求；将在短暂延迟后检查目标是否消失或页面是否变化");
+            cancelPendingCountdownRescan();
+            scheduleClickVerification(packageName, candidate.label, candidate.bounds, "控件树");
             refreshFloatingOverlay(true);
         } else {
-            database.log(packageName, safeLogLabel(candidate.label), "NO_ACTION", "Control did not accept click");
+            database.log(packageName, safeLogLabel(candidate.label), "NO_ACTION",
+                    "控件 ACTION_CLICK 与坐标手势均未被系统接受");
+            logDiagnostic(packageName, "CLICK_REJECTED", "控件拒绝 ACTION_CLICK，坐标手势也未成功派发");
         }
+    }
+
+    private void scheduleClickVerification(String packageName, String label, Rect clickedBounds, String source) {
+        if (clickedBounds == null) return;
+        final Rect expectedBounds = new Rect(clickedBounds);
+        final String expectedLabel = label == null ? "" : label;
+        mainHandler.postDelayed(() -> {
+            if (destroyed || database == null) return;
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) {
+                logDiagnostic(packageName, "CLICK_VERIFY_UNKNOWN",
+                        source + "点击后活动窗口不可读取，无法确认按钮状态");
+                return;
+            }
+            CharSequence rootPackage = root.getPackageName();
+            if (rootPackage == null || !packageName.contentEquals(rootPackage)) {
+                recycleNode(root);
+                logDiagnostic(packageName, "CLICK_VERIFIED",
+                        source + "点击后前台应用已切换，原广告页面已离开");
+                return;
+            }
+
+            hasSensitiveInputInCurrentWindow = false;
+            nodeScanIncomplete = false;
+            List<AccessibilityNodeInfo> nodes = new ArrayList<>();
+            try {
+                StringBuilder text = new StringBuilder();
+                collectNodes(root, 0, nodes, text);
+                if (hasSensitiveInputInCurrentWindow || nodeScanIncomplete) {
+                    logDiagnostic(packageName, "CLICK_VERIFY_UNKNOWN",
+                            "点击后页面出现敏感区域或控件树不完整，无法安全确认");
+                    return;
+                }
+                boolean stillVisible = false;
+                int screenWidth = getResources().getDisplayMetrics().widthPixels;
+                int screenHeight = getResources().getDisplayMetrics().heightPixels;
+                for (AccessibilityNodeInfo node : nodes) {
+                    String currentLabel = readLabel(node);
+                    if (TextMatcher.similarityPercent(expectedLabel, currentLabel) < 65) continue;
+                    Rect currentBounds = new Rect();
+                    node.getBoundsInScreen(currentBounds);
+                    if (TargetStability.areBoundsConsistent(
+                            expectedBounds.left, expectedBounds.top, expectedBounds.right, expectedBounds.bottom,
+                            currentBounds.left, currentBounds.top, currentBounds.right, currentBounds.bottom,
+                            screenWidth, screenHeight, dp(28), dp(72))) {
+                        stillVisible = true;
+                        break;
+                    }
+                }
+                if (stillVisible) {
+                    database.log(packageName, safeLogLabel(expectedLabel), "NO_ACTION",
+                            "点击请求已派发，但延迟验证时原候选仍然可见；请检查应用是否拦截手势");
+                    logDiagnostic(packageName, "CLICK_NOT_EFFECTIVE",
+                            source + "点击后原候选仍在相同区域显示，可能未生效；未自动重复点击");
+                } else {
+                    logDiagnostic(packageName, "CLICK_VERIFIED",
+                            source + "点击后原候选已消失或位置/页面已变化");
+                }
+            } catch (Throwable failure) {
+                logDiagnostic(packageName, "CLICK_VERIFY_ERROR",
+                        "点击结果验证异常：" + failure.getClass().getSimpleName());
+            } finally {
+                recycleNodes(nodes);
+            }
+        }, CLICK_VERIFY_DELAY_MS);
     }
 
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
