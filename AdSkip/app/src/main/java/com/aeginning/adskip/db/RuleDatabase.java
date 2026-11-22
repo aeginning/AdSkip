@@ -633,12 +633,29 @@ public final class RuleDatabase extends SQLiteOpenHelper {
                 "SELECT package_name, matched_text, action, reason, created_at FROM action_logs ORDER BY created_at DESC, id DESC LIMIT ?",
                 new String[]{String.valueOf(Math.max(1, Math.min(limit, 300)))})) {
             while (c.moveToNext()) {
-                result.add(android.text.format.DateFormat.format("MM-dd HH:mm:ss", c.getLong(4))
-                        + "  [" + c.getString(2) + "]  " + c.getString(0)
-                        + "  " + c.getString(1) + "\n     " + c.getString(3));
+                result.add(formatLogRow(c));
             }
         }
         return result;
+    }
+
+    /** Returns every log row currently retained in the local database, newest first. */
+    public synchronized List<String> getAllLogs() {
+        List<String> result = new ArrayList<>();
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT package_name, matched_text, action, reason, created_at FROM action_logs ORDER BY created_at DESC, id DESC",
+                null)) {
+            while (c.moveToNext()) {
+                result.add(formatLogRow(c));
+            }
+        }
+        return result;
+    }
+
+    private static String formatLogRow(Cursor c) {
+        return android.text.format.DateFormat.format("MM-dd HH:mm:ss", c.getLong(4))
+                + "  [" + c.getString(2) + "]  " + c.getString(0)
+                + "  " + c.getString(1) + "\n     " + c.getString(3);
     }
 
     public synchronized void clearLogs() { getWritableDatabase().delete("action_logs", null, null); }
