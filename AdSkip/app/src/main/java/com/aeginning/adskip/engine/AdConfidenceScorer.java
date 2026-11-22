@@ -37,9 +37,9 @@ public final class AdConfidenceScorer {
         }
 
         int score;
-        if (containsAny(candidate, "跳过广告", "跳过视频广告", "skip ad", "skip ads", "skip this ad", "skip advertisement")) {
+        if (TextMatcher.isExplicitSkipAd(candidate)) {
             score = 70;
-        } else if (containsAny(candidate, "关闭广告", "关闭推广", "close ad", "close advertisement")) {
+        } else if (TextMatcher.isExplicitCloseAd(candidate)) {
             score = 66;
         } else if (containsAny(candidate, "跳过", "skip")) {
             if (!TextMatcher.hasAdContext(context)) return result(0, "普通跳过词缺少广告上下文");
