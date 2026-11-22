@@ -47,7 +47,7 @@ public final class AdConfidenceScorer {
         boolean countdownSkipLabel = TextMatcher.isCountdownSkipLabel(candidate);
         boolean adContext = TextMatcher.hasAdContext(context);
         boolean allowedCountdownTarget = allowCountdownSkip && countdownSkipLabel && adContext;
-        boolean allowedCloseGlyph = TextMatcher.isCloseGlyph(candidate) && adContext;
+        boolean allowedCloseGlyph = closeGlyph && adContext;
         if ((TextMatcher.isCountdown(candidate) || TextMatcher.isCountdown(context))
                 && !allowedCountdownTarget && !allowedCloseGlyph) {
             return result(0, "页面仍处于广告倒计时，倒计时点击未启用或目标不明确");
@@ -82,13 +82,10 @@ public final class AdConfidenceScorer {
             return result(0, "未匹配到允许的跳过词");
         }
 
-        if (TextMatcher.hasAdContext(context)) score += 15;
+        if (adContext) score += 15;
         if (clickable && enabled && visible) score += 8;
         score += 7; // Geometry is already bounded and considered plausible.
-        if (containsAny(context, "付款确认", "确认购买", "支付密码", "授权", "权限申请", "支付",
-                "购买", "订阅", "下载", "安装", "登录", "注册", "permission", "allow access",
-                "install this app", "download now", "checkout", "payment", "purchase", "subscribe",
-                "sign in", "sign up", "register")) {
+        if (TextMatcher.hasCriticalActionContext(context)) {
             return result(0, "页面包含高风险操作上下文");
         }
         score = Math.min(100, score);
