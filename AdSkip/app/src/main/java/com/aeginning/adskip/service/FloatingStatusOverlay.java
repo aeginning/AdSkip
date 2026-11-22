@@ -105,6 +105,7 @@ final class FloatingStatusOverlay {
 
     private void ensurePanel() {
         if (windowManager == null) return;
+        lastText = "";
         createPanel();
         try {
             windowManager.addView(panel, layoutParams);
@@ -244,7 +245,7 @@ final class FloatingStatusOverlay {
         try {
             windowManager.updateViewLayout(panel, layoutParams);
         } catch (RuntimeException ignored) {
-            attached = false;
+            remove();
         }
     }
 
