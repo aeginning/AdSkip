@@ -12,16 +12,15 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import com.aeginning.adskip.R;
 import com.aeginning.adskip.db.RuleDatabase;
 
 /**
- * Small, draggable status panel hosted by the already-enabled AccessibilityService.
- *
- * TYPE_ACCESSIBILITY_OVERLAY intentionally avoids requesting the unrelated
- * SYSTEM_ALERT_WINDOW permission and is automatically removed with the service.
+ * Compact, draggable and user-resizable status panel hosted by the existing
+ * AccessibilityService. No separate overlay permission/service is required.
  */
 final class FloatingStatusOverlay {
     static final String PREF_ENABLED = "floating_overlay_enabled";
@@ -29,9 +28,27 @@ final class FloatingStatusOverlay {
     static final String PREF_SHOW_APPS = "floating_overlay_show_apps";
     static final String PREF_SHOW_DNS = "floating_overlay_show_dns";
     static final String PREF_SHOW_CLICKS = "floating_overlay_show_clicks";
+    static final String PREF_SHOW_OCR = "floating_overlay_show_ocr";
+    static final String PREF_SHOW_DNS_RULES = "floating_overlay_show_dns_rules";
+    static final String PREF_SHOW_SAFETY_BLOCKS = "floating_overlay_show_safety_blocks";
+    static final String PREF_SHOW_DNS_BLOCKS = "floating_overlay_show_dns_blocks";
+    static final String PREF_SHOW_NO_ACTION = "floating_overlay_show_no_action";
+    static final String PREF_SHOW_ERRORS = "floating_overlay_show_errors";
+    static final String PREF_WIDTH_DP = "floating_overlay_width_dp";
+    static final String PREF_HEIGHT_DP = "floating_overlay_height_dp";
+    static final String PREF_TEXT_SIZE_SP = "floating_overlay_text_size_sp";
     static final String PREF_X = "floating_overlay_x";
     static final String PREF_Y = "floating_overlay_y";
-    static final String PREF_REFRESH_REVISION = "floating_overlay_refresh_nonce";
+
+    static final int DEFAULT_WIDTH_DP = 178;
+    static final int MIN_WIDTH_DP = 150;
+    static final int MAX_WIDTH_DP = 320;
+    static final int DEFAULT_HEIGHT_DP = 190;
+    static final int MIN_HEIGHT_DP = 120;
+    static final int MAX_HEIGHT_DP = 460;
+    static final int DEFAULT_TEXT_SIZE_SP = 10;
+    static final int MIN_TEXT_SIZE_SP = 9;
+    static final int MAX_TEXT_SIZE_SP = 16;
 
     private static final long REFRESH_INTERVAL_MS = 1_200L;
 
@@ -44,11 +61,15 @@ final class FloatingStatusOverlay {
     private TextView title;
     private TextView details;
     private TextView collapseButton;
+    private ScrollView detailsScroll;
     private WindowManager.LayoutParams layoutParams;
     private boolean attached;
     private boolean expanded = true;
     private long lastRefreshAt;
     private String lastText = "";
+    private int appliedWidth = -1;
+    private int appliedHeight = -1;
+    private int appliedTextSize = -1;
 
     private float downRawX;
     private float downRawY;
@@ -72,31 +93,56 @@ final class FloatingStatusOverlay {
         lastRefreshAt = SystemClock.elapsedRealtime();
 
         int enabledApps = 0;
+        int dnsRules = 0;
         int clicks24h = 0;
+        int safetyBlocks24h = 0;
+        int dnsBlocks24h = 0;
+        int noAction24h = 0;
+        int errors24h = 0;
         if (database != null) {
             try {
                 enabledApps = database.getEnabledApps().size();
             } catch (RuntimeException ignored) { }
             try {
-                clicks24h = database.getStats24h().clickCount;
+                dnsRules = database.getActiveDomainRuleCount();
+            } catch (RuntimeException ignored) { }
+            try {
+                RuleDatabase.Stats24h stats = database.getStats24h();
+                clicks24h = stats.clickCount;
+                safetyBlocks24h = stats.blockedCount;
+                dnsBlocks24h = stats.dnsBlockCount;
+                noAction24h = stats.noActionCount;
+                errors24h = stats.errorCount;
             } catch (RuntimeException ignored) { }
         }
 
         String skipStatus = !serviceAvailable ? "未运行"
                 : enabledApps > 0 ? "已启用" : "等待选择应用";
         String dnsStatus = DnsFilterVpnService.isRunning() ? "运行中" : "未运行";
+        String ocrStatus = preferences.getBoolean("ocr_enabled", true) ? "已启用" : "未启用";
+
         String text = FloatingOverlayFormatter.format(
                 preferences.getBoolean(PREF_SHOW_SKIP, true), skipStatus,
                 preferences.getBoolean(PREF_SHOW_APPS, true), enabledApps,
                 preferences.getBoolean(PREF_SHOW_DNS, true), dnsStatus,
-                preferences.getBoolean(PREF_SHOW_CLICKS, true), clicks24h);
+                preferences.getBoolean(PREF_SHOW_CLICKS, true), clicks24h,
+                preferences.getBoolean(PREF_SHOW_OCR, true), ocrStatus,
+                preferences.getBoolean(PREF_SHOW_DNS_RULES, true), dnsRules,
+                preferences.getBoolean(PREF_SHOW_SAFETY_BLOCKS, true), safetyBlocks24h,
+                preferences.getBoolean(PREF_SHOW_DNS_BLOCKS, true), dnsBlocks24h,
+                preferences.getBoolean(PREF_SHOW_NO_ACTION, false), noAction24h,
+                preferences.getBoolean(PREF_SHOW_ERRORS, false), errors24h);
 
         if (!attached) ensurePanel();
         if (!attached) return;
-        if (!text.equals(lastText)) {
+
+        boolean contentChanged = !text.equals(lastText);
+        if (contentChanged) {
             lastText = text;
             details.setText(text);
-            if (expanded) details.setVisibility(View.VISIBLE);
+        }
+        boolean sizeChanged = applyConfiguredSize();
+        if (contentChanged || sizeChanged) {
             panel.requestLayout();
             updatePanelLayout();
         }
@@ -115,6 +161,7 @@ final class FloatingStatusOverlay {
             title = null;
             details = null;
             collapseButton = null;
+            detailsScroll = null;
             layoutParams = null;
         }
     }
@@ -123,50 +170,57 @@ final class FloatingStatusOverlay {
     private void createPanel() {
         panel = new LinearLayout(service);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(12), dp(9), dp(12), dp(10));
-        panel.setBackground(background(0xF21D2939, 0x665A7195, 18));
-        panel.setElevation(dp(10));
-        panel.setContentDescription("AdSkip 可移动状态悬浮窗");
+        panel.setPadding(dp(8), dp(5), dp(8), dp(6));
+        panel.setBackground(background(0xF21D2939, 0x665A7195, 16));
+        panel.setElevation(dp(8));
+        panel.setContentDescription("AdSkip 可调整大小的状态悬浮窗");
 
         LinearLayout header = new LinearLayout(service);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        panel.addView(header, new LinearLayout.LayoutParams(-1, -2));
+        panel.addView(header, new LinearLayout.LayoutParams(-1, dp(30)));
 
         title = new DragHandleView(service);
         title.setText(service.getString(R.string.floating_overlay_title));
         title.setTextColor(0xFFFFFFFF);
-        title.setTextSize(12);
+        title.setTextSize(11);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setSingleLine(true);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        title.setContentDescription("拖动此处移动悬浮窗");
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(34), 1f));
+        title.setContentDescription("拖动此处移动悬浮窗；轻点可收起或展开");
+        header.addView(title, new LinearLayout.LayoutParams(0, -1, 1f));
         title.setOnTouchListener(this::handleDrag);
         title.setOnClickListener(view -> toggleExpanded());
 
         collapseButton = headerButton("−");
-        header.addView(collapseButton);
         collapseButton.setContentDescription("收起或展开悬浮窗内容");
+        header.addView(collapseButton);
         collapseButton.setOnClickListener(view -> toggleExpanded());
 
         TextView closeButton = headerButton("×");
-        header.addView(closeButton);
         closeButton.setContentDescription("关闭状态悬浮窗");
+        header.addView(closeButton);
         closeButton.setOnClickListener(view ->
                 preferences.edit().putBoolean(PREF_ENABLED, false).apply());
 
+        detailsScroll = new ScrollView(service);
+        detailsScroll.setFillViewport(false);
+        detailsScroll.setVerticalScrollBarEnabled(true);
+        detailsScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        panel.addView(detailsScroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+
         details = new TextView(service);
         details.setTextColor(0xFFF2F4F7);
-        details.setTextSize(11);
-        details.setLineSpacing(dp(3), 1.05f);
-        details.setPadding(0, dp(7), 0, 0);
-        details.setMaxWidth(dp(210));
-        panel.addView(details, new LinearLayout.LayoutParams(-1, -2));
+        details.setIncludeFontPadding(false);
+        details.setLineSpacing(dp(1), 1.0f);
+        details.setPadding(dp(1), dp(4), dp(3), dp(4));
+        details.setTextSize(DEFAULT_TEXT_SIZE_SP);
+        details.setFocusable(false);
+        detailsScroll.addView(details, new ScrollView.LayoutParams(-1, -2));
 
         layoutParams = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
+                dp(clamp(preferences.getInt(PREF_WIDTH_DP, DEFAULT_WIDTH_DP), MIN_WIDTH_DP, MAX_WIDTH_DP)),
+                dp(clamp(preferences.getInt(PREF_HEIGHT_DP, DEFAULT_HEIGHT_DP), MIN_HEIGHT_DP, MAX_HEIGHT_DP)),
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -174,15 +228,50 @@ final class FloatingStatusOverlay {
         layoutParams.gravity = Gravity.TOP | Gravity.START;
         layoutParams.x = Math.max(0, preferences.getInt(PREF_X, dp(12)));
         layoutParams.y = Math.max(0, preferences.getInt(PREF_Y, dp(120)));
+        applyConfiguredSize();
         if (!expanded) {
-            details.setVisibility(View.GONE);
+            detailsScroll.setVisibility(View.GONE);
             collapseButton.setText("+");
         }
     }
 
+    private boolean applyConfiguredSize() {
+        if (layoutParams == null) return false;
+        int widthDp = clamp(preferences.getInt(PREF_WIDTH_DP, DEFAULT_WIDTH_DP),
+                MIN_WIDTH_DP, MAX_WIDTH_DP);
+        int heightDp = clamp(preferences.getInt(PREF_HEIGHT_DP, DEFAULT_HEIGHT_DP),
+                MIN_HEIGHT_DP, MAX_HEIGHT_DP);
+        int textSize = clamp(preferences.getInt(PREF_TEXT_SIZE_SP, DEFAULT_TEXT_SIZE_SP),
+                MIN_TEXT_SIZE_SP, MAX_TEXT_SIZE_SP);
+
+        int screenWidthDp = Math.max(MIN_WIDTH_DP,
+                Math.round(service.getResources().getDisplayMetrics().widthPixels
+                        / service.getResources().getDisplayMetrics().density) - 16);
+        int screenHeightDp = Math.max(MIN_HEIGHT_DP,
+                Math.round(service.getResources().getDisplayMetrics().heightPixels
+                        / service.getResources().getDisplayMetrics().density) - 32);
+        widthDp = Math.min(widthDp, screenWidthDp);
+        heightDp = Math.min(heightDp, Math.min(MAX_HEIGHT_DP, screenHeightDp));
+
+        boolean changed = widthDp != appliedWidth || heightDp != appliedHeight
+                || textSize != appliedTextSize;
+        if (!changed) return false;
+
+        layoutParams.width = dp(widthDp);
+        layoutParams.height = dp(heightDp);
+        details.setTextSize(textSize);
+        details.setLineSpacing(dp(textSize <= 10 ? 1 : 2), 1.0f);
+        title.setTextSize(Math.max(10, Math.min(14, textSize + 1)));
+        appliedWidth = widthDp;
+        appliedHeight = heightDp;
+        appliedTextSize = textSize;
+        clampToScreen();
+        return true;
+    }
+
     private void toggleExpanded() {
         expanded = !expanded;
-        details.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        detailsScroll.setVisibility(expanded ? View.VISIBLE : View.GONE);
         collapseButton.setText(expanded ? "−" : "+");
         updatePanelLayout();
     }
@@ -190,13 +279,13 @@ final class FloatingStatusOverlay {
     private TextView headerButton(String value) {
         TextView button = new TextView(service);
         button.setText(value);
-        button.setTextSize(19);
+        button.setTextSize(18);
         button.setTextColor(0xFFFFFFFF);
         button.setGravity(Gravity.CENTER);
-        button.setBackground(background(0x33FFFFFF, 0, 8));
-        button.setPadding(dp(8), 0, dp(8), 0);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(30), dp(30));
-        params.leftMargin = dp(4);
+        button.setBackground(background(0x33FFFFFF, 0, 7));
+        button.setPadding(dp(6), 0, dp(6), 0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(26), dp(26));
+        params.leftMargin = dp(3);
         button.setLayoutParams(params);
         button.setClickable(true);
         return button;
@@ -244,11 +333,12 @@ final class FloatingStatusOverlay {
     }
 
     private void clampToScreen() {
+        if (layoutParams == null) return;
         android.util.DisplayMetrics metrics = service.getResources().getDisplayMetrics();
-        int maxX = Math.max(0, metrics.widthPixels - Math.max(panel.getWidth(), dp(100)));
-        int maxY = Math.max(0, metrics.heightPixels - Math.max(panel.getHeight(), dp(60)));
-        layoutParams.x = Math.min(layoutParams.x, maxX);
-        layoutParams.y = Math.min(layoutParams.y, maxY);
+        int maxX = Math.max(0, metrics.widthPixels - layoutParams.width);
+        int maxY = Math.max(0, metrics.heightPixels - layoutParams.height);
+        layoutParams.x = Math.max(0, Math.min(layoutParams.x, maxX));
+        layoutParams.y = Math.max(0, Math.min(layoutParams.y, maxY));
     }
 
     private void updatePanelLayout() {
@@ -271,8 +361,16 @@ final class FloatingStatusOverlay {
         title = null;
         details = null;
         collapseButton = null;
+        detailsScroll = null;
         layoutParams = null;
+        appliedWidth = -1;
+        appliedHeight = -1;
+        appliedTextSize = -1;
         lastText = "";
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(value, max));
     }
 
     @android.annotation.SuppressLint("AppCompatCustomView")
