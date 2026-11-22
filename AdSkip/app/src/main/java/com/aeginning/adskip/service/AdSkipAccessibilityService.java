@@ -80,7 +80,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         overlayPreferenceListener = (preferences, key) -> {
             if (key != null && (key.startsWith("floating_overlay_") || "dns_active".equals(key))
                     && floatingStatusOverlay != null) {
-                floatingStatusOverlay.refresh(database, true, true);
+                mainHandler.post(() -> {
+                    if (!destroyed && floatingStatusOverlay != null) {
+                        floatingStatusOverlay.refresh(database, true, true);
+                    }
+                });
             }
         };
         overlayPreferences.registerOnSharedPreferenceChangeListener(overlayPreferenceListener);
