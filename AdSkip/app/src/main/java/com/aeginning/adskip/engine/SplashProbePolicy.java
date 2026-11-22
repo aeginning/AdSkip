@@ -7,7 +7,7 @@ package com.aeginning.adskip.engine;
  */
 public final class SplashProbePolicy {
     public static final int MAX_ATTEMPTS = 5;
-    public static final int EXTREME_MAX_ATTEMPTS = 12;
+    public static final int EXTREME_MAX_ATTEMPTS = 24;
     public static final long INITIAL_DELAY_MS = 650L;
     public static final long RETRY_DELAY_MS = 900L;
     public static final long OCR_INTERVAL_MS = 1_050L;
