@@ -187,9 +187,16 @@ public final class TextMatcher {
 
     private static String stripDynamicCountdown(String value) {
         if (!isCountdown(value) && !isCountdownSkipLabel(value)) return value;
-        return value.replaceAll("\\d{1,2}\\s*[:：]\\s*\\d{1,2}", " ")
-                .replaceAll("\\d+\\s*(?:秒|s|sec|secs|second|seconds|초)", " ")
-                .replaceAll("\\s+", " ").trim();
+        String normalized = value.replaceAll("\\d{1,2}\\s*[:：]\\s*\\d{1,2}", " ");
+        // Remove the changing number attached to the skip action, including
+        // labels with no unit ("Skip 4") and abbreviated/full English units.
+        normalized = normalized.replaceAll(
+                "(?i)(skip(?:\\s+(?:in|after))?|跳过|スキップ|건너뛰기)\\s*\\d+\\s*(?:seconds?|secs?|s|秒|초)?",
+                "$1");
+        // Longest English alternatives must come first so "seconds" is not
+        // partially consumed as "sec", which would leave a trailing "onds".
+        normalized = normalized.replaceAll("\\d+\\s*(?:seconds?|secs?|s|秒|초)", " ");
+        return normalized.replaceAll("\\s+", " ").trim();
     }
 
     public static String normalize(String input) {
