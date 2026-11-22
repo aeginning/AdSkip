@@ -1,5 +1,7 @@
 package com.aeginning.adskip.engine;
 
+import java.util.Collections;
+import java.util.List;
 
 /** Pure, deterministic confidence model. It never authorizes risky controls. */
 public final class AdConfidenceScorer {
@@ -38,6 +40,15 @@ public final class AdConfidenceScorer {
                                     boolean enabled, boolean visible, int targetWidth,
                                     int targetHeight, int screenWidth, int screenHeight,
                                     boolean allowCountdownSkip, int minimumScore) {
+        return assess(label, screenText, clickable, enabled, visible, targetWidth, targetHeight,
+                screenWidth, screenHeight, allowCountdownSkip, minimumScore, Collections.emptyList());
+    }
+
+    public static Assessment assess(String label, String screenText, boolean clickable,
+                                    boolean enabled, boolean visible, int targetWidth,
+                                    int targetHeight, int screenWidth, int screenHeight,
+                                    boolean allowCountdownSkip, int minimumScore,
+                                    List<String> customSkipWords) {
         String candidate = normalize(label);
         String context = normalize(screenText);
         if (candidate.isEmpty()) return result(0, "空标签");
@@ -72,6 +83,10 @@ public final class AdConfidenceScorer {
             score = 70;
         } else if (TextMatcher.isExplicitCloseAd(candidate)) {
             score = 66;
+        } else if (TextMatcher.isCustomSkipPhrase(candidate, customSkipWords)) {
+            if (!adContext) return result(0, "自定义跳过词缺少广告上下文");
+            // Custom terms can enter review, never the highest-confidence built-in tier.
+            score = 54;
         } else if (containsAny(candidate, "跳过", "skip")) {
             if (!TextMatcher.hasAdContext(context)) return result(0, "普通跳过词缺少广告上下文");
             score = 48;

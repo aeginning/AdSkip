@@ -2,6 +2,7 @@ package com.aeginning.adskip.engine;
 
 import java.util.Locale;
 import java.text.Normalizer;
+import java.util.List;
 
 public final class TextMatcher {
     private TextMatcher() { }
@@ -62,6 +63,37 @@ public final class TextMatcher {
             "購入", "支払い", "インストール", "許可", "登録", "申し込む",
             "구매", "결제", "설치", "허용", "가입", "구독"
     };
+
+    /** Read-only default vocabulary for the settings UI. */
+    public static String[] getDefaultExplicitSkipAdWords() { return EXPLICIT_SKIP_AD.clone(); }
+
+    public static String[] getDefaultExplicitCloseAdWords() { return EXPLICIT_CLOSE_AD.clone(); }
+
+    public static String[] getDefaultGenericSkipWords() { return new String[]{"跳过", "skip"}; }
+
+    public static String[] getDefaultGenericCloseWords() { return new String[]{"关闭", "close"}; }
+
+    public static String[] getDefaultCloseGlyphWords() {
+        return new String[]{"X", "×", "✕", "✖", "✗", "✘", "╳", "⨯", "☓", "❎", "❌"};
+    }
+
+    /** True when a proposed custom term is already covered by built-in matching. */
+    public static boolean isDefaultSkipTerm(String text) {
+        String value = normalize(text);
+        return value.equals("跳过") || value.equals("skip")
+                || value.equals("关闭") || value.equals("close")
+                || containsAny(value, EXPLICIT_SKIP_AD)
+                || containsAny(value, EXPLICIT_CLOSE_AD)
+                || isCloseGlyph(value);
+    }
+
+    /** Custom phrases are positive hints only; negative and dangerous labels can never match. */
+    public static boolean isCustomSkipPhrase(String text, List<String> customWords) {
+        String value = normalize(text);
+        if (value.isEmpty() || isNegativeSkip(value) || isDangerous(value)
+                || isCloseGlyph(value)) return false;
+        return SkipWordLibrary.matches(value, customWords);
+    }
 
     public static boolean isExplicitSkipAd(String text) {
         return containsAny(normalize(text), EXPLICIT_SKIP_AD);

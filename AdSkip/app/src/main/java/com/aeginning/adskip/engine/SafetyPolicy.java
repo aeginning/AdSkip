@@ -2,6 +2,9 @@ package com.aeginning.adskip.engine;
 
 import android.graphics.Rect;
 
+import java.util.Collections;
+import java.util.List;
+
 /** Conservative final gate. Scoring is advisory; this policy remains authoritative. */
 public final class SafetyPolicy {
     private SafetyPolicy() { }
@@ -25,6 +28,16 @@ public final class SafetyPolicy {
                                        boolean clickable, boolean enabled, boolean visible,
                                        String candidateText, String surroundingText,
                                        boolean allowCountdownSkip, int minimumScore) {
+        return isSafeTarget(bounds, screenWidth, screenHeight, clickable, enabled, visible,
+                candidateText, surroundingText, allowCountdownSkip, minimumScore,
+                Collections.emptyList());
+    }
+
+    public static boolean isSafeTarget(Rect bounds, int screenWidth, int screenHeight,
+                                       boolean clickable, boolean enabled, boolean visible,
+                                       String candidateText, String surroundingText,
+                                       boolean allowCountdownSkip, int minimumScore,
+                                       List<String> customSkipWords) {
         if (bounds == null || screenWidth <= 0 || screenHeight <= 0) return false;
         if (bounds.isEmpty() || bounds.left < 0 || bounds.top < 0
                 || bounds.right > screenWidth || bounds.bottom > screenHeight) return false;
@@ -64,7 +77,7 @@ public final class SafetyPolicy {
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                 candidateText, surroundingText, clickable, enabled, visible,
                 bounds.width(), bounds.height(), screenWidth, screenHeight,
-                allowCountdownSkip, minimumScore);
+                allowCountdownSkip, minimumScore, customSkipWords);
         return assessment.score >= Math.max(50, Math.min(95, minimumScore))
                 && !TextMatcher.isDangerous(candidateText)
                 && !TextMatcher.hasCriticalActionContext(surroundingText);
