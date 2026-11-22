@@ -34,6 +34,14 @@ public final class TextMatcher {
             "広告をスキップ", "광고 건너뛰기"
     };
 
+    /** Shared high-risk screen context used by both scoring and the final click gate. */
+    private static final String[] CRITICAL_ACTION_CONTEXT = {
+            "付款确认", "确认购买", "支付密码", "授权", "权限申请", "支付",
+            "购买", "订阅", "下载", "安装", "登录", "注册", "permission", "allow access",
+            "install this app", "download now", "checkout", "payment", "purchase", "subscribe",
+            "sign in", "sign up", "register"
+    };
+
     private static final String[] EXPLICIT_CLOSE_AD = {
             "关闭广告", "关闭此广告", "关闭当前广告", "关闭视频广告",
             "关闭推广", "关闭赞助内容", "关掉广告",
@@ -98,6 +106,11 @@ public final class TextMatcher {
         String value = normalize(text);
         for (String token : DANGEROUS) if (value.contains(normalize(token))) return true;
         return false;
+    }
+
+    /** Returns true when the surrounding screen contains any purchase, permission or account flow. */
+    public static boolean hasCriticalActionContext(String text) {
+        return containsAny(normalize(text), CRITICAL_ACTION_CONTEXT);
     }
 
     public static boolean isCountdown(String text) {
