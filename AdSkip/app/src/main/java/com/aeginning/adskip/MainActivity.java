@@ -3,6 +3,8 @@ package com.aeginning.adskip;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
@@ -1224,17 +1226,58 @@ public final class MainActivity extends Activity {
     private void showLogs() {
         List<String> logs = database.getRecentLogs(100);
         String content = logs.isEmpty()
-                ? "当前还没有运行记录。先开启无障碍服务，在“应用自动化”中勾选要测试的应用，再打开该应用页面。\n\n服务连接、扫描开始、无候选、敏感区域保护、OCR 失败、安全拦截、手势结果和点击后验证都会写入本机诊断日志。"
-                : "诊断日志会说明每次未点击的原因；不会保存输入框内容或整屏 OCR 文本。\n\n" + String.join("\n\n", logs);
+                ? "当前还没有运行记录。先开启无障碍服务，在“应用自动化”中勾选要测试的应用，再打开该应用页面。\\n\\n服务连接、扫描开始、无候选、敏感区域保护、OCR 失败、安全拦截、手势结果和点击后验证都会写入本机诊断日志。"
+                : "当前页面显示最近 100 条；点击“一键复制全部日志”会复制数据库中当前保留的全部日志。\\n诊断日志会说明每次未点击的原因；不会保存输入框内容或整屏 OCR 文本。\\n\\n" + String.join("\\n\\n", logs);
         TextView text = label(content, 12, 0xFF344054, false);
         text.setPadding(dp(14), dp(8), dp(14), dp(8));
         ScrollView scroll = new ScrollView(this);
         scroll.addView(text);
-        new AlertDialog.Builder(this).setTitle("识别诊断与过滤日志 · 最近 100 条")
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("识别诊断与过滤日志 · 最近 100 条")
                 .setView(scroll)
                 .setNegativeButton("关闭", null)
-                .setNeutralButton("清空日志", (dialog, which) -> database.clearLogs())
-                .show();
+                .setNeutralButton("清空日志", null)
+                .setPositiveButton("一键复制全部日志", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> copyAllLogs());
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v ->
+                    new AlertDialog.Builder(this)
+                            .setTitle("确认清空日志")
+                            .setMessage("此操作会删除本机当前保存的全部识别与 DNS 过滤日志，且无法恢复。")
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("确认清空", (confirm, which) -> {
+                                database.clearLogs();
+                                dialog.dismiss();
+                                Toast.makeText(this, "日志已清空", Toast.LENGTH_SHORT).show();
+                            })
+                            .show());
+        });
+        dialog.show();
+    }
+
+    private void copyAllLogs() {
+        List<String> logs = database.getAllLogs();
+        if (logs.isEmpty()) {
+            Toast.makeText(this, "当前没有日志可复制", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String content = "AdSkip 识别诊断与过滤日志（共 " + logs.size() + " 条）\\n\\n"
+                + String.join("\\n\\n", logs);
+        try {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard == null) {
+                Toast.makeText(this, "无法访问系统剪贴板", Toast.LENGTH_LONG).show();
+                return;
+            }
+            clipboard.setPrimaryClip(ClipData.newPlainText("AdSkip 全部日志", content));
+            Toast.makeText(this, "已复制全部 " + logs.size() + " 条日志", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "复制日志失败：" + e.getClass().getSimpleName(),
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     private void addOverlaySizeControl(LinearLayout parent, String title,
