@@ -132,10 +132,6 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             db.execSQL("CREATE TABLE IF NOT EXISTS suppressed_labels (package_name TEXT NOT NULL, phrase TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(package_name, phrase))");
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_suppressed_labels_package ON suppressed_labels(package_name)");
         }
-        if (oldVersion < 3) {
-            db.execSQL("CREATE TABLE IF NOT EXISTS suppressed_labels (package_name TEXT NOT NULL, phrase TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(package_name, phrase))");
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_suppressed_labels_package ON suppressed_labels(package_name)");
-        }
         if (oldVersion < 4) {
             // Append newly curated defaults without deleting or replacing user-defined rules.
             insertDefaultDomainRules(db);
