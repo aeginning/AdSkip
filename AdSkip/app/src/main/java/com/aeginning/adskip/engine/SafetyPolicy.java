@@ -17,6 +17,14 @@ public final class SafetyPolicy {
                                        boolean clickable, boolean enabled, boolean visible,
                                        String candidateText, String surroundingText,
                                        boolean allowCountdownSkip) {
+        return isSafeTarget(bounds, screenWidth, screenHeight, clickable, enabled, visible,
+                candidateText, surroundingText, allowCountdownSkip, 75);
+    }
+
+    public static boolean isSafeTarget(Rect bounds, int screenWidth, int screenHeight,
+                                       boolean clickable, boolean enabled, boolean visible,
+                                       String candidateText, String surroundingText,
+                                       boolean allowCountdownSkip, int minimumScore) {
         if (bounds == null || screenWidth <= 0 || screenHeight <= 0) return false;
         if (bounds.isEmpty() || bounds.left < 0 || bounds.top < 0
                 || bounds.right > screenWidth || bounds.bottom > screenHeight) return false;
@@ -25,19 +33,32 @@ public final class SafetyPolicy {
                 || bounds.height() > screenHeight * 0.25f) return false;
         // Keep coordinate actions away from system gesture regions. An explicitly
         // enabled, OCR-confirmed skip countdown may live in the top-right splash-ad slot.
+        boolean adContext = TextMatcher.hasAdContext(surroundingText);
         boolean topRightCountdownControl = allowCountdownSkip
                 && TextMatcher.isCountdownSkipLabel(candidateText)
-                && TextMatcher.hasAdContext(surroundingText)
+                && adContext
                 && bounds.left >= screenWidth * 0.60f
                 && bounds.top >= screenHeight * 0.01f
                 && bounds.bottom <= screenHeight * 0.12f;
-        if ((bounds.top < screenHeight * 0.025f && !topRightCountdownControl)
+        boolean topRightCloseGlyph = TextMatcher.isCloseGlyph(candidateText)
+                && adContext
+                && bounds.left >= screenWidth * 0.70f
+                && bounds.centerX() >= screenWidth * 0.82f
+                && bounds.top >= screenHeight * 0.025f
+                && bounds.bottom <= screenHeight * 0.22f
+                && bounds.width() <= screenWidth * 0.16f
+                && bounds.height() <= screenHeight * 0.10f;
+        if ((bounds.top < screenHeight * 0.025f
+                    && !topRightCountdownControl && !topRightCloseGlyph)
                 || bounds.bottom > screenHeight * 0.96f) return false;
+        // A lone X is accepted only as a small, top-right ad close affordance.
+        if (TextMatcher.isCloseGlyph(candidateText) && !topRightCloseGlyph) return false;
 
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                 candidateText, surroundingText, clickable, enabled, visible,
-                bounds.width(), bounds.height(), screenWidth, screenHeight, allowCountdownSkip);
-        return assessment.score >= 75
+                bounds.width(), bounds.height(), screenWidth, screenHeight,
+                allowCountdownSkip, minimumScore);
+        return assessment.score >= Math.max(50, Math.min(95, minimumScore))
                 && !TextMatcher.isDangerous(candidateText)
                 && !isCriticalScreenContext(surroundingText);
     }
