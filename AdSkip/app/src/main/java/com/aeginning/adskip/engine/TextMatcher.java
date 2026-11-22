@@ -120,6 +120,7 @@ public final class TextMatcher {
     public static boolean isCountdown(String text) {
         String value = normalize(text);
         return value.matches(".*\\bskip\\s+(?:in|after)\\s+\\d+.*")
+                || value.matches(".*skip\\s+(?:in|after)\\s+\\d{1,2}[:：]\\d{2}.*")
                 || value.matches(".*\\b\\d+\\s*(?:s|sec|secs|second|seconds)\\s+(?:to\\s+)?skip.*")
                 || value.matches(".*\\d+\\s*(?:秒|s|sec|second|seconds)\\s*后?(?:可)?\\s*跳过.*")
                 || value.matches(".*(?:跳过|skip)\\s*\\d+\\s*(?:秒|s|sec|secs|second|seconds)?(?:\\s|$|[,，。.!！?？]).*")
@@ -134,6 +135,7 @@ public final class TextMatcher {
     public static boolean isCountdownSkipLabel(String text) {
         String value = normalize(text);
         return value.matches(".*(?:跳过|skip(?:\\s+(?:in|after))?|スキップ|건너뛰기|omitir|saltar|ignorer|überspringen|пропустить|تخطي)\\s*\\d+.*")
+                || value.matches(".*skip\\s+(?:in|after)\\s+\\d{1,2}[:：]\\d{2}.*")
                 || value.matches(".*\\bskip\\s+(?:in|after)\\s+\\d+.*")
                 || value.matches(".*\\d+\\s*(?:秒|s|sec|secs|second|seconds)\\s*(?:后|to)?\\s*(?:跳过|skip).*")
                 || value.matches(".*あと\\s*\\d+\\s*秒.*")
