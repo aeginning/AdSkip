@@ -63,6 +63,15 @@ public final class TextMatcher {
         return containsAny(normalize(text), EXPLICIT_CLOSE_AD);
     }
 
+    /** Exact visual close glyphs commonly used by splash ads. Geometry and ad context
+     * are verified separately by SafetyPolicy before any action is allowed. */
+    public static boolean isCloseGlyph(String text) {
+        String value = normalize(text);
+        return value.equals("x") || value.equals("×") || value.equals("✕")
+                || value.equals("✖") || value.equals("✗") || value.equals("✘");
+    }
+
+
     private static boolean containsAny(String value, String[] tokens) {
         for (String token : tokens) {
             if (value.contains(normalize(token))) return true;
