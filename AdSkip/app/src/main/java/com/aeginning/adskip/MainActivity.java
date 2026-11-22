@@ -261,9 +261,9 @@ public final class MainActivity extends Activity {
 
         // Optional countdown clicking and configurable second-observation text similarity.
         LinearLayout recognitionCard = card(root);
-        recognitionCard.addView(label("识别灵敏度与倒计时", 18, 0xFF172033, true));
+        recognitionCard.addView(label("跳过识别设置", 18, 0xFF172033, true));
         TextView recognitionHint = label(
-                "倒计时点击仅针对明确呈现“跳过 + 数字”的广告控件；相似度比较前后两次文字；灵敏度控制候选触发门槛。X 仅在广告右上角小型关闭区域识别。",
+                "支持倒计时“跳过 + 数字”及广告右上角 X / × 关闭符号识别。灵敏度控制候选触发门槛；二次确认可按需关闭；相似度仅在二次确认开启时生效。",
                 12, 0xFF7A8495, false);
         recognitionHint.setLineSpacing(dp(3), 1.0f);
         addGap(recognitionCard, 5);
