@@ -24,6 +24,7 @@ import com.aeginning.adskip.engine.SensitiveInputPolicy;
 import com.aeginning.adskip.engine.SensitiveRegionPolicy;
 import com.aeginning.adskip.engine.DiagnosticLogThrottle;
 import com.aeginning.adskip.engine.TargetStability;
+import com.aeginning.adskip.engine.SplashProbePolicy;
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions;
@@ -85,6 +86,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private Runnable pendingCountdownRescan;
     private String countdownRescanPackage;
     private int countdownRescanAttempts;
+    private Runnable pendingSplashProbe;
+    private String splashProbePackage;
+    private int splashProbeAttempts;
 
     @Override public void onServiceConnected() {
         super.onServiceConnected();
@@ -122,50 +126,104 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
                 && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return;
 
+        String previousSplashProbePackage = splashProbePackage;
+        int previousSplashProbeAttempts = splashProbeAttempts;
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             windowGeneration++;
             cancelPendingNodeConfirmation();
             cancelPendingCountdownRescan();
+            cancelPendingSplashProbe();
         }
 
         CharSequence packageName = event.getPackageName();
-        if (packageName == null) {
-            logDiagnostic("", "NO_PACKAGE", "系统无障碍事件未提供目标应用包名，无法安全扫描");
+        AccessibilityNodeInfo fallbackRoot = null;
+        String pkg = packageName == null ? "" : packageName.toString().trim();
+
+        // Some Android 13/OEM accessibility events (especially content/window
+        // refresh events) omit event.getPackageName(). Recover only from the
+        // currently active accessibility root, never from a stale remembered
+        // package or a broad UsageStats guess.
+        if (pkg.isEmpty()) {
+            try {
+                fallbackRoot = getRootInActiveWindow();
+            } catch (Throwable failure) {
+                logDiagnostic("", "NO_PACKAGE_ROOT_ERROR",
+                        "事件未提供包名，且读取活动窗口失败：" + failure.getClass().getSimpleName());
+                return;
+            }
+            CharSequence rootPackage = fallbackRoot == null ? null : fallbackRoot.getPackageName();
+            pkg = rootPackage == null ? "" : rootPackage.toString().trim();
+            if (pkg.isEmpty() || pkg.equals(getPackageName())) {
+                recycleNode(fallbackRoot);
+                logDiagnostic("", "NO_PACKAGE",
+                        "事件和当前活动窗口均未提供有效目标包名；未使用历史包名猜测目标");
+                return;
+            }
+            logDiagnostic("", "PACKAGE_FROM_ACTIVE_ROOT",
+                    "事件未提供包名，已从当前活动无障碍窗口安全恢复目标；仍需通过应用启用状态和窗口一致性检查");
+        }
+
+        boolean newForegroundApp = false;
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            SharedPreferences foregroundPrefs = getSharedPreferences("adskip_settings", MODE_PRIVATE);
+            String previousPackage = foregroundPrefs.getString("foreground_last_package", "");
+            long previousAt = foregroundPrefs.getLong("foreground_last_at", 0L);
+            newForegroundApp = SplashProbePolicy.isNewLaunch(
+                    previousPackage, pkg, previousAt, System.currentTimeMillis());
+            // Window-list notifications can follow a state-change notification for the
+            // same launch. Preserve its bounded probe budget and rebind to the new
+            // window generation instead of accidentally dropping the startup probe.
+            if (pkg.equals(previousSplashProbePackage)) {
+                newForegroundApp = true;
+                splashProbePackage = pkg;
+                splashProbeAttempts = previousSplashProbeAttempts;
+            }
+            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                CharSequence className = event.getClassName();
+                foregroundPrefs.edit()
+                        .putString("foreground_last_package", pkg)
+                        .putString("foreground_last_class", className == null ? "" : className.toString())
+                        .putLong("foreground_last_at", System.currentTimeMillis())
+                        .apply();
+            }
+        }
+        if (pkg.equals(getPackageName())) {
+            recycleNode(fallbackRoot);
             return;
         }
-        String pkg = packageName.toString();
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            CharSequence className = event.getClassName();
-            getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
-                    .putString("foreground_last_package", pkg)
-                    .putString("foreground_last_class", className == null ? "" : className.toString())
-                    .putLong("foreground_last_at", System.currentTimeMillis())
-                    .apply();
-        }
-        if (pkg.equals(getPackageName())) return;
         if (!database.isAppEnabled(pkg)) {
-            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            recycleNode(fallbackRoot);
+            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                    || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
                 logDiagnostic("", "APP_NOT_ENABLED",
-                        "前台应用尚未在应用自动化中启用；为保护隐私不扫描页面，包名不写入日志");
+                        "当前前台应用尚未在应用自动化中启用；请在应用自动化中勾选并保存后重试。为保护隐私不扫描页面");
             }
             return;
         }
 
+        if (newForegroundApp && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && isOcrEnabled()) {
+            scheduleSplashProbe(pkg, windowGeneration);
+        }
+
         long now = SystemClock.elapsedRealtime();
         if (now - lastScanAt < EVENT_INTERVAL_MS) {
+            recycleNode(fallbackRoot);
             logDiagnostic(pkg, "SCAN_THROTTLED", "短时间收到重复无障碍事件，已合并扫描以降低耗电");
             return;
         }
         lastScanAt = now;
         logDiagnostic(pkg, "SCAN", "开始扫描当前窗口的可见控件树");
 
-        AccessibilityNodeInfo root;
-        try {
-            root = getRootInActiveWindow();
-        } catch (Throwable failure) {
-            logDiagnostic(pkg, "NO_WINDOW", "读取活动窗口失败：" + failure.getClass().getSimpleName());
-            return;
+        AccessibilityNodeInfo root = fallbackRoot;
+        if (root == null) {
+            try {
+                root = getRootInActiveWindow();
+            } catch (Throwable failure) {
+                logDiagnostic(pkg, "NO_WINDOW", "读取活动窗口失败：" + failure.getClass().getSimpleName());
+                return;
+            }
         }
         hasSensitiveInputInCurrentWindow = false;
         sensitiveInputBounds.clear();
@@ -205,6 +263,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
             candidate = chooseCandidate(nodes, context, pkg);
             if (candidate != null) {
+                cancelPendingSplashProbe();
                 logDiagnostic(pkg, "CANDIDATE", "发现候选控件，置信度=" + candidate.score + "；进入安全复核");
                 scheduleNodeConfirmation(candidate, pkg, windowGeneration, context);
             } else {
@@ -520,6 +579,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private void scheduleCountdownRescan(String packageName, long generation) {
         if (destroyed || database == null || packageName == null
                 || generation != windowGeneration || !database.isAppEnabled(packageName)) return;
+        cancelPendingSplashProbe();
         if (!packageName.equals(countdownRescanPackage)) {
             cancelPendingCountdownRescan();
             countdownRescanPackage = packageName;
@@ -606,6 +666,119 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
         };
         mainHandler.postDelayed(pendingCountdownRescan, COUNTDOWN_RESCAN_INTERVAL_MS);
+    }
+
+    private void cancelPendingSplashProbe() {
+        if (pendingSplashProbe != null) mainHandler.removeCallbacks(pendingSplashProbe);
+        pendingSplashProbe = null;
+        splashProbePackage = null;
+        splashProbeAttempts = 0;
+    }
+
+    /**
+     * A launch can initially expose only a blank/loading frame. Probe for a short,
+     * bounded interval so late-rendered splash ads are not missed by the 7s idle OCR cadence.
+     */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private void scheduleSplashProbe(String packageName, long generation) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || destroyed || database == null
+                || packageName == null || packageName.trim().isEmpty()
+                || generation != windowGeneration || !database.isAppEnabled(packageName)
+                || !isOcrEnabled()) return;
+        if (!packageName.equals(splashProbePackage)) {
+            cancelPendingSplashProbe();
+            splashProbePackage = packageName;
+        }
+        if (pendingSplashProbe != null) return;
+        if (!SplashProbePolicy.hasMoreAttempts(splashProbeAttempts)) {
+            logDiagnostic(packageName, "SPLASH_PROBE_FINISHED",
+                    "开屏主动探测达到有限次数上限；后续交由普通事件和低频视觉探测处理");
+            cancelPendingSplashProbe();
+            return;
+        }
+        long delay = SplashProbePolicy.delayForAttempt(splashProbeAttempts);
+        pendingSplashProbe = () -> {
+            pendingSplashProbe = null;
+            splashProbeAttempts++;
+            if (destroyed || database == null || generation != windowGeneration
+                    || !database.isAppEnabled(packageName)) {
+                cancelPendingSplashProbe();
+                return;
+            }
+            if (packageName.equals(countdownRescanPackage)) {
+                cancelPendingSplashProbe();
+                return;
+            }
+
+            AccessibilityNodeInfo root;
+            try {
+                root = getRootInActiveWindow();
+            } catch (Throwable failure) {
+                logDiagnostic(packageName, "SPLASH_PROBE_ERROR",
+                        "读取开屏活动窗口失败：" + failure.getClass().getSimpleName());
+                scheduleSplashProbe(packageName, generation);
+                return;
+            }
+            if (root == null) {
+                logDiagnostic(packageName, "SPLASH_PROBE_NO_WINDOW", "开屏主动探测暂时无法读取活动窗口");
+                scheduleSplashProbe(packageName, generation);
+                return;
+            }
+            CharSequence rootPackage = root.getPackageName();
+            if (rootPackage == null || !packageName.contentEquals(rootPackage)) {
+                recycleNode(root);
+                logDiagnostic(packageName, "SPLASH_PROBE_WINDOW_CHANGED", "开屏探测时活动窗口已切换；停止旧应用探测");
+                cancelPendingSplashProbe();
+                return;
+            }
+
+            hasSensitiveInputInCurrentWindow = false;
+            sensitiveInputBounds.clear();
+            sensitiveInputBoundsUnknown = false;
+            nodeScanIncomplete = false;
+            List<AccessibilityNodeInfo> nodes = new ArrayList<>();
+            Candidate candidate = null;
+            try {
+                StringBuilder text = new StringBuilder();
+                collectNodes(root, 0, nodes, text);
+                if (nodeScanIncomplete) {
+                    logDiagnostic(packageName, "SPLASH_PROBE_INCOMPLETE",
+                            "开屏主动探测的控件树不完整，本轮不执行点击或截图");
+                } else {
+                    String context = text.toString();
+                    if (TextMatcher.isCountdown(context)) {
+                        logDiagnostic(packageName, "SPLASH_PROBE_COUNTDOWN",
+                                "开屏探测发现广告倒计时，切换到现有倒计时主动重扫");
+                        scheduleCountdownRescan(packageName, generation);
+                    } else {
+                        candidate = chooseCandidate(nodes, context, packageName);
+                        if (candidate != null) {
+                            logDiagnostic(packageName, "SPLASH_PROBE_CANDIDATE",
+                                    "开屏探测发现控件树候选，进入既有二次确认流程");
+                            cancelPendingSplashProbe();
+                            scheduleNodeConfirmation(candidate, packageName, generation, context);
+                        } else if (hasSensitiveInputInCurrentWindow || sensitiveInputBoundsUnknown) {
+                            logDiagnostic(packageName, "SPLASH_PROBE_SENSITIVE",
+                                    "当前窗口存在敏感输入或敏感区域边界未知；本轮禁止整屏 OCR");
+                        } else {
+                            maybeRunOcr(packageName, TextMatcher.hasAdContext(context), true,
+                                    generation, context, true);
+                            logDiagnostic(packageName, "SPLASH_PROBE", "已执行开屏延迟加载探测；继续有限次数复查");
+                        }
+                    }
+                }
+            } catch (Throwable failure) {
+                logDiagnostic(packageName, "SPLASH_PROBE_ERROR",
+                        "开屏控件树探测异常：" + failure.getClass().getSimpleName());
+            } finally {
+                if (candidate != null && candidate.ownsNode) recycleNode(candidate.node);
+                recycleNodes(nodes);
+            }
+            if (splashProbePackage != null && packageName.equals(splashProbePackage)) {
+                scheduleSplashProbe(packageName, generation);
+            }
+        };
+        mainHandler.postDelayed(pendingSplashProbe, delay);
     }
 
     private void cancelPendingCountdownRescan() {
@@ -721,6 +894,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             logDiagnostic(packageName, "CLICK_DISPATCHED",
                     "系统已接受点击请求；将在短暂延迟后检查目标是否消失或页面是否变化");
             cancelPendingCountdownRescan();
+            cancelPendingSplashProbe();
             scheduleClickVerification(packageName, candidate.label, candidate.bounds, "控件树");
             refreshFloatingOverlay(true);
         } else {
@@ -805,6 +979,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe,
                              long generation, String treeContext) {
+        maybeRunOcr(expectedPackage, adContext, allowVisualProbe, generation, treeContext, false);
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe,
+                             long generation, String treeContext, boolean splashProbe) {
         if (ocrInFlight) {
             logDiagnostic(expectedPackage, "OCR_BUSY", "上一轮 OCR 尚未完成，本次截图请求已合并");
             return;
@@ -823,7 +1003,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return;
         }
         long now = SystemClock.elapsedRealtime();
-        long interval = adContext ? OCR_AD_INTERVAL_MS : OCR_VISUAL_PROBE_INTERVAL_MS;
+        long interval = adContext ? OCR_AD_INTERVAL_MS
+                : splashProbe ? SplashProbePolicy.OCR_INTERVAL_MS : OCR_VISUAL_PROBE_INTERVAL_MS;
         if (now - lastOcrAt < interval) {
             logDiagnostic(expectedPackage, "OCR_THROTTLED", "OCR 截图间隔未达到限制，已节流");
             return;
@@ -986,6 +1167,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     logDiagnostic(expectedPackage, "OCR_SUCCESS",
                             recognizerName(recognizer) + "模型完成识别；文本块=" + result.getTextBlocks().size());
                     if (TextMatcher.isCountdown(context)) {
+                        cancelPendingSplashProbe();
                         logDiagnostic(expectedPackage, "OCR_COUNTDOWN_WAIT",
                                 "OCR 图像仍检测到倒计时；保持主动扫描任务");
                         mainHandler.post(() -> scheduleCountdownRescan(expectedPackage, generation));
@@ -1049,6 +1231,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     }
 
                     OcrCandidate selected = best;
+                    mainHandler.post(() -> {
+                        if (expectedPackage.equals(splashProbePackage)) cancelPendingSplashProbe();
+                    });
                     logDiagnostic(expectedPackage, "OCR_CANDIDATE",
                             recognizerName(recognizer) + "模型发现候选，置信度=" + selected.score);
                     mainHandler.post(() -> executeOcrCandidate(selected, context, sourceWidth,
@@ -1126,6 +1311,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             logDiagnostic(expectedPackage, "OCR_UNAVAILABLE", "Android 11 以下不支持当前截图 OCR 路径");
             return;
         }
+        if (expectedPackage.equals(splashProbePackage)) cancelPendingSplashProbe();
         if (!isOcrEnabled()) {
             logDiagnostic(expectedPackage, "OCR_DISABLED", "OCR 辅助识别已关闭");
             return;
@@ -1422,6 +1608,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                 logDiagnostic(expectedPackage, "CLICK_DISPATCHED",
                                         "OCR 二次确认手势已派发，等待点击结果验证");
                                 cancelPendingCountdownRescan();
+                                cancelPendingSplashProbe();
                                 scheduleClickVerification(expectedPackage, observedLabel, mapped, "OCR 二次确认");
                                 refreshFloatingOverlay(true);
                             } else {
@@ -1656,6 +1843,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         windowGeneration++;
         cancelPendingNodeConfirmation();
         cancelPendingCountdownRescan();
+        cancelPendingSplashProbe();
         refreshFloatingOverlay(true);
     }
 
@@ -1664,6 +1852,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         windowGeneration++;
         cancelPendingNodeConfirmation();
         cancelPendingCountdownRescan();
+        cancelPendingSplashProbe();
         if (overlayPreferences != null && overlayPreferenceListener != null) {
             overlayPreferences.unregisterOnSharedPreferenceChangeListener(overlayPreferenceListener);
         }
