@@ -11,7 +11,6 @@ import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -213,7 +212,7 @@ public final class DnsFeedManager {
 
     public static DownloadedFeed download(Source source, ProgressListener listener) throws IOException {
         return download(source,
-                URL::openConnection,
+                url -> (HttpURLConnection) url.openConnection(),
                 Thread::sleep,
                 listener);
     }
@@ -376,7 +375,7 @@ public final class DnsFeedManager {
         }
         if (message.contains("only ") && message.contains("domains found")
                 || message.contains("validation failed")
-                || message.contains("html page")
+                || message.contains("html")
                 || message.contains("invalid domain")) {
             return new AttemptFailure(FailureKind.VALIDATION, failure, false);
         }
