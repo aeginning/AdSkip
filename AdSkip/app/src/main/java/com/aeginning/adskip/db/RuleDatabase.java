@@ -5,12 +5,15 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.database.sqlite.SQLiteStatement;
 import android.os.SystemClock;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -20,8 +23,10 @@ import com.aeginning.adskip.engine.DomainRuleValidator;
 /** Local-only rule database. No screen text or network traffic is uploaded. */
 public final class RuleDatabase extends SQLiteOpenHelper {
     private static final String DB_NAME = "adskip_rules.db";
-    private static final int DB_VERSION = 4;
-    private static final long DOMAIN_CACHE_TTL_MS = 2_000L;
+    private static final int DB_VERSION = 5;
+    private static final long DOMAIN_CACHE_TTL_MS = 3_000L;
+    private static final int DOMAIN_CACHE_MAX_ENTRIES = 2_048;
+    private static final int MAX_SUBSCRIPTION_RULES = 120_000;
     private static final int MAX_DOMAIN_RULES = 5_000;
     private static final int MAX_LOG_ENTRIES = 2_000;
     private static final int LOG_TRIM_INTERVAL = 64;
@@ -112,8 +117,12 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             "appbaqend.com"
     };
 
-    private Set<String> blockedDomainCache;
-    private long blockedDomainCacheAt;
+    private final LinkedHashMap<String, DomainCacheEntry> domainLookupCache =
+            new LinkedHashMap<String, DomainCacheEntry>(128, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(Map.Entry<String, DomainCacheEntry> eldest) {
+                    return size() > DOMAIN_CACHE_MAX_ENTRIES;
+                }
+            };
 
     public RuleDatabase(Context context) { super(context, DB_NAME, null, DB_VERSION); }
 
@@ -124,6 +133,7 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX idx_action_logs_created ON action_logs(created_at DESC)");
         db.execSQL("CREATE TABLE suppressed_labels (package_name TEXT NOT NULL, phrase TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(package_name, phrase))");
         db.execSQL("CREATE INDEX idx_suppressed_labels_package ON suppressed_labels(package_name)");
+        createDnsSubscriptionTables(db);
         insertDefaultDomainRules(db);
     }
 
@@ -136,6 +146,20 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             // Append newly curated defaults without deleting or replacing user-defined rules.
             insertDefaultDomainRules(db);
         }
+        if (oldVersion < 5) {
+            createDnsSubscriptionTables(db);
+        }
+    }
+
+    private static void createDnsSubscriptionTables(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS dns_subscriptions ("
+                + "feed_id TEXT PRIMARY KEY NOT NULL, feed_name TEXT NOT NULL, "
+                + "feed_version TEXT NOT NULL DEFAULT '', enabled INTEGER NOT NULL DEFAULT 1, "
+                + "rule_count INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS dns_subscription_rules ("
+                + "feed_id TEXT NOT NULL, domain TEXT NOT NULL, PRIMARY KEY(feed_id, domain))");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_dns_subscription_rules_domain "
+                + "ON dns_subscription_rules(domain)");
     }
 
     private static void insertDefaultDomainRules(SQLiteDatabase db) {
@@ -144,6 +168,189 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             values.put("domain", domain);
             values.put("enabled", 1);
             db.insertWithOnConflict("domain_rules", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+        }
+    }
+
+    public static final class DnsFeedInfo {
+        public final String feedId;
+        public final String feedName;
+        public final String version;
+        public final boolean enabled;
+        public final int ruleCount;
+        public final long updatedAt;
+
+        DnsFeedInfo(String feedId, String feedName, String version,
+                    boolean enabled, int ruleCount, long updatedAt) {
+            this.feedId = feedId;
+            this.feedName = feedName;
+            this.version = version;
+            this.enabled = enabled;
+            this.ruleCount = ruleCount;
+            this.updatedAt = updatedAt;
+        }
+
+        public String toDisplayText() {
+            return feedName + " · " + ruleCount + " 条 · "
+                    + (enabled ? "已启用" : "已停用")
+                    + (updatedAt > 0 ? " · " + android.text.format.DateFormat.format("yyyy-MM-dd HH:mm", updatedAt) : "");
+        }
+    }
+
+    public static final class DnsFeedImportResult {
+        public final boolean success;
+        public final int savedCount;
+        public final String error;
+
+        DnsFeedImportResult(boolean success, int savedCount, String error) {
+            this.success = success;
+            this.savedCount = savedCount;
+            this.error = error == null ? "" : error;
+        }
+    }
+
+    /**
+     * Atomically replace one downloaded feed only after strict validation.
+     * Existing manual rules and other feed subscriptions are never changed.
+     * An existing feed's enabled/disabled preference survives an update.
+     */
+    public synchronized DnsFeedImportResult replaceDnsFeed(
+            String feedId, String feedName, String version, List<String> rawDomains) {
+        if (!("hagezi-light".equals(feedId) || "stevenblack-base".equals(feedId))
+                || feedName == null || feedName.trim().isEmpty() || rawDomains == null) {
+            return new DnsFeedImportResult(false, 0, "不支持的 DNS 订阅来源");
+        }
+        if (rawDomains.size() < 1_000 || rawDomains.size() > MAX_SUBSCRIPTION_RULES) {
+            return new DnsFeedImportResult(false, 0, "订阅条目数量超出安全范围");
+        }
+
+        Set<String> normalized = new HashSet<>();
+        int invalid = 0;
+        for (String raw : rawDomains) {
+            if (raw == null || raw.trim().isEmpty()) continue;
+            String domain = normalizeDomain(raw);
+            if (domain.isEmpty()) invalid++;
+            else normalized.add(domain);
+            if (normalized.size() > MAX_SUBSCRIPTION_RULES) {
+                return new DnsFeedImportResult(false, normalized.size(), "订阅超过最大规则数量");
+            }
+        }
+        if (invalid > 0 || normalized.size() < 1_000) {
+            return new DnsFeedImportResult(false, normalized.size(),
+                    "订阅校验失败：包含 " + invalid + " 条无效域名或有效条目不足；原订阅未修改");
+        }
+
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            int previouslyEnabled = 1;
+            try (Cursor existing = db.query("dns_subscriptions", new String[]{"enabled"},
+                    "feed_id=?", new String[]{feedId}, null, null, null)) {
+                if (existing.moveToFirst()) previouslyEnabled = existing.getInt(0);
+            }
+
+            ContentValues metadata = new ContentValues();
+            metadata.put("feed_id", feedId);
+            metadata.put("feed_name", feedName.trim());
+            metadata.put("feed_version", version == null ? "" : version.trim());
+            metadata.put("enabled", previouslyEnabled);
+            metadata.put("rule_count", normalized.size());
+            metadata.put("updated_at", System.currentTimeMillis());
+            db.insertWithOnConflict("dns_subscriptions", null, metadata, SQLiteDatabase.CONFLICT_REPLACE);
+
+            db.delete("dns_subscription_rules", "feed_id=?", new String[]{feedId});
+            SQLiteStatement insert = db.compileStatement(
+                    "INSERT OR IGNORE INTO dns_subscription_rules(feed_id, domain) VALUES (?, ?)");
+            try {
+                for (String domain : normalized) {
+                    insert.clearBindings();
+                    insert.bindString(1, feedId);
+                    insert.bindString(2, domain);
+                    insert.executeInsert();
+                }
+            } finally {
+                insert.close();
+            }
+            db.setTransactionSuccessful();
+            return new DnsFeedImportResult(true, normalized.size(), "");
+        } catch (RuntimeException failure) {
+            return new DnsFeedImportResult(false, 0,
+                    "订阅写入失败：" + failure.getClass().getSimpleName());
+        } finally {
+            db.endTransaction();
+            clearDomainLookupCache();
+        }
+    }
+
+    public synchronized List<DnsFeedInfo> getDnsFeeds() {
+        List<DnsFeedInfo> result = new ArrayList<>();
+        try (Cursor c = getReadableDatabase().query("dns_subscriptions",
+                new String[]{"feed_id", "feed_name", "feed_version", "enabled", "rule_count", "updated_at"},
+                null, null, null, null, "feed_name ASC")) {
+            while (c.moveToNext()) {
+                result.add(new DnsFeedInfo(c.getString(0), c.getString(1), c.getString(2),
+                        c.getInt(3) == 1, c.getInt(4), c.getLong(5)));
+            }
+        }
+        return result;
+    }
+
+    public synchronized boolean setDnsFeedEnabled(String feedId, boolean enabled) {
+        if (!isKnownFeedId(feedId)) return false;
+        ContentValues values = new ContentValues();
+        values.put("enabled", enabled ? 1 : 0);
+        boolean updated = getWritableDatabase().update("dns_subscriptions", values,
+                "feed_id=?", new String[]{feedId}) > 0;
+        if (updated) clearDomainLookupCache();
+        return updated;
+    }
+
+    public synchronized boolean removeDnsFeed(String feedId) {
+        if (!isKnownFeedId(feedId)) return false;
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            db.delete("dns_subscription_rules", "feed_id=?", new String[]{feedId});
+            db.delete("dns_subscriptions", "feed_id=?", new String[]{feedId});
+            db.setTransactionSuccessful();
+            return true;
+        } finally {
+            db.endTransaction();
+            clearDomainLookupCache();
+        }
+    }
+
+    public synchronized int getActiveDomainRuleCount() {
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT COUNT(*) FROM (SELECT domain FROM domain_rules WHERE enabled=1 "
+                        + "UNION SELECT r.domain FROM dns_subscription_rules r "
+                        + "INNER JOIN dns_subscriptions s ON s.feed_id=r.feed_id WHERE s.enabled=1)", null)) {
+            return c.moveToFirst() ? c.getInt(0) : 0;
+        }
+    }
+
+    public synchronized int getManualDomainRuleCount() {
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT COUNT(*) FROM domain_rules WHERE enabled=1", null)) {
+            return c.moveToFirst() ? c.getInt(0) : 0;
+        }
+    }
+
+    public synchronized void invalidateDomainCache() { clearDomainLookupCache(); }
+
+    private static boolean isKnownFeedId(String feedId) {
+        return "hagezi-light".equals(feedId) || "stevenblack-base".equals(feedId);
+    }
+
+    private void clearDomainLookupCache() {
+        domainLookupCache.clear();
+    }
+
+    private static final class DomainCacheEntry {
+        final boolean blocked;
+        final long expiresAt;
+        DomainCacheEntry(boolean blocked, long expiresAt) {
+            this.blocked = blocked;
+            this.expiresAt = expiresAt;
         }
     }
 
@@ -228,8 +435,7 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
-            blockedDomainCache = null;
-            blockedDomainCacheAt = 0;
+            clearDomainLookupCache();
         }
         return new DomainRuleReplaceResult(true, normalizedDomains.size(), 0);
     }
@@ -269,33 +475,36 @@ public final class RuleDatabase extends SQLiteOpenHelper {
     public synchronized boolean isDomainBlocked(String rawDomain) {
         String domain = normalizeDomain(rawDomain);
         if (domain.isEmpty()) return false;
-        Set<String> rules = getBlockedDomainSnapshot();
-        if (rules.contains(domain)) return true;
+
+        long now = SystemClock.elapsedRealtime();
+        DomainCacheEntry cached = domainLookupCache.get(domain);
+        if (cached != null && cached.expiresAt > now) return cached.blocked;
+
+        List<String> candidates = new ArrayList<>();
+        candidates.add(domain);
         int dot = domain.indexOf('.');
         while (dot >= 0 && dot < domain.length() - 1) {
-            if (rules.contains(domain.substring(dot + 1))) return true;
+            String suffix = domain.substring(dot + 1);
+            if (suffix.indexOf('.') >= 0) candidates.add(suffix);
             dot = domain.indexOf('.', dot + 1);
         }
-        return false;
-    }
 
-    /** Cache the small, user-managed domain rule set to avoid a DB cursor per DNS packet. */
-    private Set<String> getBlockedDomainSnapshot() {
-        long now = SystemClock.elapsedRealtime();
-        if (blockedDomainCache != null && now - blockedDomainCacheAt < DOMAIN_CACHE_TTL_MS) {
-            return blockedDomainCache;
+        String placeholders = String.join(",", Collections.nCopies(candidates.size(), "?"));
+        String sql = "SELECT 1 FROM domain_rules WHERE enabled=1 AND domain IN (" + placeholders + ") "
+                + "UNION ALL SELECT 1 FROM dns_subscription_rules r "
+                + "INNER JOIN dns_subscriptions s ON s.feed_id=r.feed_id "
+                + "WHERE s.enabled=1 AND r.domain IN (" + placeholders + ") LIMIT 1";
+        String[] args = new String[candidates.size() * 2];
+        for (int i = 0; i < candidates.size(); i++) {
+            args[i] = candidates.get(i);
+            args[i + candidates.size()] = candidates.get(i);
         }
-        Set<String> refreshed = new HashSet<>();
-        try (Cursor c = getReadableDatabase().query("domain_rules", new String[]{"domain"},
-                "enabled=1", null, null, null, null)) {
-            while (c.moveToNext()) {
-                String domain = c.getString(0);
-                if (domain != null) refreshed.add(domain);
-            }
+        boolean blocked;
+        try (Cursor c = getReadableDatabase().rawQuery(sql, args)) {
+            blocked = c.moveToFirst();
         }
-        blockedDomainCache = Collections.unmodifiableSet(refreshed);
-        blockedDomainCacheAt = now;
-        return blockedDomainCache;
+        domainLookupCache.put(domain, new DomainCacheEntry(blocked, now + DOMAIN_CACHE_TTL_MS));
+        return blocked;
     }
 
     public synchronized void log(String packageName, String matchedText, String action, String reason) {
