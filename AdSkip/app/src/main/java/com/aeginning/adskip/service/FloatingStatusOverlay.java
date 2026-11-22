@@ -42,13 +42,13 @@ final class FloatingStatusOverlay {
 
     static final int DEFAULT_WIDTH_DP = 178;
     static final int MIN_WIDTH_DP = 150;
-    static final int MAX_WIDTH_DP = 320;
+    static final int MAX_WIDTH_DP = 560;
     static final int DEFAULT_HEIGHT_DP = 190;
     static final int MIN_HEIGHT_DP = 120;
-    static final int MAX_HEIGHT_DP = 460;
+    static final int MAX_HEIGHT_DP = 900;
     static final int DEFAULT_TEXT_SIZE_SP = 10;
     static final int MIN_TEXT_SIZE_SP = 9;
-    static final int MAX_TEXT_SIZE_SP = 16;
+    static final int MAX_TEXT_SIZE_SP = 24;
 
     private static final long REFRESH_INTERVAL_MS = 1_200L;
 
@@ -118,6 +118,10 @@ final class FloatingStatusOverlay {
 
         String skipStatus = !serviceAvailable ? "未运行"
                 : enabledApps > 0 ? "已启用" : "等待选择应用";
+        if (serviceAvailable && enabledApps > 0
+                && preferences.getBoolean("extreme_skip_mode", false)) {
+            skipStatus += " · 极速模式";
+        }
         String dnsStatus = DnsFilterVpnService.isRunning() ? "运行中" : "未运行";
         String ocrStatus = preferences.getBoolean("ocr_enabled", true) ? "已启用" : "未启用";
 

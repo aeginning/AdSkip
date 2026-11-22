@@ -7,19 +7,37 @@ package com.aeginning.adskip.engine;
  */
 public final class SplashProbePolicy {
     public static final int MAX_ATTEMPTS = 5;
+    public static final int EXTREME_MAX_ATTEMPTS = 24;
     public static final long INITIAL_DELAY_MS = 650L;
     public static final long RETRY_DELAY_MS = 900L;
     public static final long OCR_INTERVAL_MS = 1_050L;
+    public static final long EXTREME_INITIAL_DELAY_MS = 220L;
+    public static final long EXTREME_RETRY_DELAY_MS = 320L;
+    public static final long EXTREME_OCR_INTERVAL_MS = 320L;
     public static final long RESUME_GAP_MS = 30_000L;
 
     private SplashProbePolicy() { }
 
     public static boolean hasMoreAttempts(int completedAttempts) {
-        return completedAttempts < MAX_ATTEMPTS;
+        return hasMoreAttempts(completedAttempts, false);
+    }
+
+    public static boolean hasMoreAttempts(int completedAttempts, boolean extreme) {
+        return completedAttempts < (extreme ? EXTREME_MAX_ATTEMPTS : MAX_ATTEMPTS);
     }
 
     public static long delayForAttempt(int completedAttempts) {
+        return delayForAttempt(completedAttempts, false);
+    }
+
+    public static long delayForAttempt(int completedAttempts, boolean extreme) {
+        if (extreme) return completedAttempts <= 0
+                ? EXTREME_INITIAL_DELAY_MS : EXTREME_RETRY_DELAY_MS;
         return completedAttempts <= 0 ? INITIAL_DELAY_MS : RETRY_DELAY_MS;
+    }
+
+    public static long ocrIntervalMs(boolean extreme) {
+        return extreme ? EXTREME_OCR_INTERVAL_MS : OCR_INTERVAL_MS;
     }
 
     /**

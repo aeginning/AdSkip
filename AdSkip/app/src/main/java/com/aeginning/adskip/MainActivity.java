@@ -225,16 +225,16 @@ public final class MainActivity extends Activity {
         TextView sizeHeading = label("悬浮窗尺寸自定义", 14, 0xFF344054, true);
         overlayCard.addView(sizeHeading);
         TextView sizeHint = label(
-                "默认已缩小；内容较多时可在悬浮窗内部上下滑动。宽度、高度和文字大小均可独立调整。",
+                "尺寸调节范围已扩展。宽度最高 560dp、高度最高 900dp、文字最高 24sp；实际显示尺寸会自动适配屏幕边界，内容多时仍可在悬浮窗内滚动。",
                 11, 0xFF7A8495, false);
         addGap(overlayCard, 3);
         overlayCard.addView(sizeHint);
         addOverlaySizeControl(overlayCard, "悬浮窗宽度", "floating_overlay_width_dp",
-                150, 320, 178, "dp");
+                150, 560, 178, "dp");
         addOverlaySizeControl(overlayCard, "悬浮窗高度", "floating_overlay_height_dp",
-                120, 460, 190, "dp");
+                120, 900, 190, "dp");
         addOverlaySizeControl(overlayCard, "悬浮窗文字大小", "floating_overlay_text_size_sp",
-                9, 16, 10, "sp");
+                9, 24, 10, "sp");
 
         addGap(root, 14);
 
@@ -337,11 +337,36 @@ public final class MainActivity extends Activity {
         LinearLayout recognitionCard = card(root);
         recognitionCard.addView(label("跳过识别设置", 18, 0xFF172033, true));
         TextView recognitionHint = label(
-                "支持倒计时“跳过 + 数字”及广告右上角 X / × 关闭符号识别。灵敏度控制候选触发门槛；二次确认可按需关闭；相似度仅在二次确认开启时生效。",
+                "支持倒计时“跳过 + 数字”及广告右上角 X / × 关闭符号识别。灵敏度控制普通模式的候选触发门槛；极速模式会使用更低门槛和更短扫描间隔。",
                 12, 0xFF7A8495, false);
         recognitionHint.setLineSpacing(dp(3), 1.0f);
         addGap(recognitionCard, 5);
         recognitionCard.addView(recognitionHint);
+
+        android.widget.Switch extremeModeSwitch = new android.widget.Switch(this);
+        extremeModeSwitch.setText("开启极速跳过广告模式（高频扫描 / OCR）");
+        extremeModeSwitch.setTextSize(14);
+        extremeModeSwitch.setTextColor(0xFF344054);
+        extremeModeSwitch.setPadding(0, dp(8), 0, dp(4));
+        extremeModeSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("extreme_skip_mode", false));
+        extremeModeSwitch.setContentDescription(
+                "极速跳过模式：提高扫描频率并降低最低候选分数，但保留风险操作和窗口安全检查");
+        extremeModeSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
+            getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                    .putBoolean("extreme_skip_mode", checked).apply();
+            Toast.makeText(this, checked
+                    ? "极速模式已开启：扫描、OCR 更频繁，耗电与发热会明显增加；安全拦截仍然生效。"
+                    : "已恢复标准跳过模式。", Toast.LENGTH_LONG).show();
+        });
+        addGap(recognitionCard, 6);
+        recognitionCard.addView(extremeModeSwitch);
+        TextView extremeModeHint = label(
+                "极速模式会将扫描间隔缩短至约 120ms、广告 OCR 节流缩短至约 320ms、倒计时重扫缩短至约 180ms，并把最低识别分数设为 60。仅对已勾选应用生效；仍保留高风险操作拦截、敏感输入排除、窗口校验、点击冷却和现有二次确认设置。耗电、发热和误匹配概率都会上升。",
+                11, 0xFF7A8495, false);
+        extremeModeHint.setLineSpacing(dp(3), 1.0f);
+        addGap(recognitionCard, 2);
+        recognitionCard.addView(extremeModeHint);
 
         android.widget.Switch countdownClickSwitch = new android.widget.Switch(this);
         countdownClickSwitch.setText("倒计时期间也尝试点击“跳过”");
