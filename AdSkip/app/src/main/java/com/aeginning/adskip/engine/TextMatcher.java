@@ -2,6 +2,9 @@ package com.aeginning.adskip.engine;
 
 import java.util.Locale;
 import java.text.Normalizer;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 public final class TextMatcher {
     private TextMatcher() { }
@@ -62,6 +65,18 @@ public final class TextMatcher {
             "購入", "支払い", "インストール", "許可", "登録", "申し込む",
             "구매", "결제", "설치", "허용", "가입", "구독"
     };
+
+    public static List<String> getDefaultSkipAdWords() {
+        return Collections.unmodifiableList(Arrays.asList(EXPLICIT_SKIP_AD.clone()));
+    }
+
+    public static List<String> getDefaultCloseAdWords() {
+        return Collections.unmodifiableList(Arrays.asList(EXPLICIT_CLOSE_AD.clone()));
+    }
+
+    public static List<String> getDefaultGenericSkipWords() {
+        return Collections.unmodifiableList(Arrays.asList("跳过", "skip", "关闭", "close"));
+    }
 
     public static boolean isExplicitSkipAd(String text) {
         return containsAny(normalize(text), EXPLICIT_SKIP_AD);
