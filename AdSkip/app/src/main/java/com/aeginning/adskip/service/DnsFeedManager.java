@@ -294,11 +294,16 @@ public final class DnsFeedManager {
         if (manager != null) {
             Network active = manager.getActiveNetwork();
             if (active != null) {
-                java.net.URLConnection opened = active.openConnection(url);
-                if (!(opened instanceof HttpURLConnection)) {
-                    throw new IOException("当前网络未提供 HTTP 连接");
+                try {
+                    java.net.URLConnection opened = active.openConnection(url);
+                    if (!(opened instanceof HttpURLConnection)) {
+                        throw new IOException("当前网络未提供 HTTP 连接");
+                    }
+                    return (HttpURLConnection) opened;
+                } catch (RuntimeException networkChanged) {
+                    // The default network can disappear between getActiveNetwork() and openConnection().
+                    // Re-resolve through the system default route; the next mirror re-reads it again.
                 }
-                return (HttpURLConnection) opened;
             }
         }
         return (HttpURLConnection) url.openConnection();
