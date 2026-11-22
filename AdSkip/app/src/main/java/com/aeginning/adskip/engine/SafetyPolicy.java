@@ -9,6 +9,14 @@ public final class SafetyPolicy {
     public static boolean isSafeTarget(Rect bounds, int screenWidth, int screenHeight,
                                        boolean clickable, boolean enabled, boolean visible,
                                        String candidateText, String surroundingText) {
+        return isSafeTarget(bounds, screenWidth, screenHeight, clickable, enabled, visible,
+                candidateText, surroundingText, false);
+    }
+
+    public static boolean isSafeTarget(Rect bounds, int screenWidth, int screenHeight,
+                                       boolean clickable, boolean enabled, boolean visible,
+                                       String candidateText, String surroundingText,
+                                       boolean allowCountdownSkip) {
         if (bounds == null || screenWidth <= 0 || screenHeight <= 0) return false;
         if (bounds.isEmpty() || bounds.left < 0 || bounds.top < 0
                 || bounds.right > screenWidth || bounds.bottom > screenHeight) return false;
@@ -20,7 +28,7 @@ public final class SafetyPolicy {
 
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                 candidateText, surroundingText, clickable, enabled, visible,
-                bounds.width(), bounds.height(), screenWidth, screenHeight);
+                bounds.width(), bounds.height(), screenWidth, screenHeight, allowCountdownSkip);
         return assessment.score >= 75
                 && !TextMatcher.isDangerous(candidateText)
                 && !isCriticalScreenContext(surroundingText);
