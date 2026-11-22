@@ -709,14 +709,35 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
-    private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe, long generation) {
-        if (ocrInFlight || hasSensitiveInputInCurrentWindow || !isOcrEnabled()) return;
-        if (!adContext && !allowVisualProbe) return;
+    private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe,
+                             long generation, String treeContext) {
+        if (ocrInFlight) {
+            logDiagnostic(expectedPackage, "OCR_BUSY", "上一轮 OCR 尚未完成，本次截图请求已合并");
+            return;
+        }
+        if (hasSensitiveInputInCurrentWindow) {
+            logDiagnostic(expectedPackage, "OCR_BLOCKED_SENSITIVE",
+                    "当前窗口存在敏感输入区域，已禁止截图 OCR");
+            return;
+        }
+        if (!isOcrEnabled()) {
+            logDiagnostic(expectedPackage, "OCR_DISABLED", "用户已关闭 OCR 辅助识别");
+            return;
+        }
+        if (!adContext && !allowVisualProbe) {
+            logDiagnostic(expectedPackage, "OCR_NO_AD_CONTEXT", "页面没有广告上下文，且未允许视觉探测");
+            return;
+        }
         long now = SystemClock.elapsedRealtime();
         long interval = adContext ? OCR_AD_INTERVAL_MS : OCR_VISUAL_PROBE_INTERVAL_MS;
-        if (now - lastOcrAt < interval) return;
+        if (now - lastOcrAt < interval) {
+            logDiagnostic(expectedPackage, "OCR_THROTTLED", "OCR 截图间隔未达到限制，已节流");
+            return;
+        }
         lastOcrAt = now;
         ocrInFlight = true;
+        logDiagnostic(expectedPackage, "OCR_START",
+                "开始本地多语言 OCR；优先语言由系统语言和控件树字符特征决定");
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, new TakeScreenshotCallback() {
                 @Override public void onSuccess(ScreenshotResult result) {
@@ -724,25 +745,223 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     try {
                         bitmap = copyScreenshotBitmap(result);
                         if (bitmap == null) {
+                            logDiagnostic(expectedPackage, "OCR_ERROR", "系统截图结果为空或无法转换为软件位图");
                             ocrInFlight = false;
                             return;
                         }
                         Bitmap bounded = resizeForOcr(bitmap);
                         if (bounded != bitmap && !bitmap.isRecycled()) bitmap.recycle();
-                        runRecognizers(bounded, expectedPackage, generation);
-                        bitmap = null; // Ownership transferred to runRecognizers().
+                        runRecognizers(bounded, expectedPackage, generation, treeContext);
+                        bitmap = null;
                     } catch (Throwable failure) {
                         if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+                        logDiagnostic(expectedPackage, "OCR_ERROR",
+                                "截图预处理失败：" + failure.getClass().getSimpleName());
                         ocrInFlight = false;
                     }
                 }
 
                 @Override public void onFailure(int errorCode) {
+                    logDiagnostic(expectedPackage, "OCR_ERROR", "Android 截图 API 返回错误码 " + errorCode
+                            + "；可能受安全窗口、系统权限或厂商 ROM 限制");
                     ocrInFlight = false;
                 }
             });
-        } catch (Throwable t) {
+        } catch (Throwable failure) {
+            logDiagnostic(expectedPackage, "OCR_ERROR",
+                    "调用截图 API 异常：" + failure.getClass().getSimpleName());
             ocrInFlight = false;
+        }
+    }
+
+    private List<TextRecognizer> getRecognizerOrder(String visibleText) {
+        List<TextRecognizer> ordered = new ArrayList<>();
+        String language = java.util.Locale.getDefault().getLanguage();
+        boolean japanese = containsUnicodeScript(visibleText, Character.UnicodeBlock.HIRAGANA)
+                || containsUnicodeScript(visibleText, Character.UnicodeBlock.KATAKANA)
+                || "ja".equals(language);
+        boolean korean = containsHangul(visibleText) || "ko".equals(language);
+        boolean devanagari = containsUnicodeScript(visibleText, Character.UnicodeBlock.DEVANAGARI)
+                || "hi".equals(language) || "mr".equals(language) || "ne".equals(language);
+        boolean chinese = containsUnicodeScript(visibleText, Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS)
+                || "zh".equals(language);
+
+        if (japanese) addRecognizer(ordered, japaneseRecognizer);
+        if (korean) addRecognizer(ordered, koreanRecognizer);
+        if (devanagari) addRecognizer(ordered, devanagariRecognizer);
+        if (chinese) addRecognizer(ordered, chineseRecognizer);
+        if (!japanese && !korean && !devanagari && !chinese) {
+            addRecognizer(ordered, latinRecognizer);
+        }
+        // Bounded sequential fallback: only one model processes the bitmap at a time.
+        addRecognizer(ordered, latinRecognizer);
+        addRecognizer(ordered, chineseRecognizer);
+        addRecognizer(ordered, japaneseRecognizer);
+        addRecognizer(ordered, koreanRecognizer);
+        addRecognizer(ordered, devanagariRecognizer);
+        return ordered;
+    }
+
+    private void addRecognizer(List<TextRecognizer> ordered, TextRecognizer recognizer) {
+        if (recognizer != null && !ordered.contains(recognizer)) ordered.add(recognizer);
+    }
+
+    private boolean containsHangul(String value) {
+        if (value == null) return false;
+        for (int i = 0; i < value.length();) {
+            int codePoint = value.codePointAt(i);
+            Character.UnicodeBlock block = Character.UnicodeBlock.of(codePoint);
+            if (block == Character.UnicodeBlock.HANGUL_SYLLABLES
+                    || block == Character.UnicodeBlock.HANGUL_JAMO
+                    || block == Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO) return true;
+            i += Character.charCount(codePoint);
+        }
+        return false;
+    }
+
+    private boolean containsUnicodeScript(String value, Character.UnicodeBlock target) {
+        if (value == null || target == null) return false;
+        for (int i = 0; i < value.length();) {
+            int codePoint = value.codePointAt(i);
+            if (Character.UnicodeBlock.of(codePoint) == target) return true;
+            i += Character.charCount(codePoint);
+        }
+        return false;
+    }
+
+    private String recognizerName(TextRecognizer recognizer) {
+        if (recognizer == chineseRecognizer) return "中文";
+        if (recognizer == latinRecognizer) return "拉丁字母";
+        if (recognizer == japaneseRecognizer) return "日文";
+        if (recognizer == koreanRecognizer) return "韩文";
+        if (recognizer == devanagariRecognizer) return "天城文";
+        return "未知";
+    }
+
+    private void runRecognizers(Bitmap bitmap, String expectedPackage, long generation, String treeContext) {
+        List<TextRecognizer> recognizers = getRecognizerOrder(treeContext);
+        if (recognizers.isEmpty()) {
+            if (!bitmap.isRecycled()) bitmap.recycle();
+            ocrInFlight = false;
+            logDiagnostic(expectedPackage, "OCR_ERROR", "没有可用的本地 OCR 识别模型");
+            return;
+        }
+        runOcrPass(bitmap, expectedPackage, generation, recognizers, 0);
+    }
+
+    private void runOcrPass(Bitmap bitmap, String expectedPackage, long generation,
+                            List<TextRecognizer> recognizers, int recognizerIndex) {
+        if (destroyed || bitmap == null || bitmap.isRecycled()) {
+            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+            ocrInFlight = false;
+            return;
+        }
+        if (recognizerIndex >= recognizers.size()) {
+            if (!bitmap.isRecycled()) bitmap.recycle();
+            ocrInFlight = false;
+            logDiagnostic(expectedPackage, "OCR_NO_CANDIDATE",
+                    "已按优先顺序尝试全部可用语言模型，仍未发现明确且安全的跳过/关闭控件");
+            return;
+        }
+
+        TextRecognizer recognizer = recognizers.get(recognizerIndex);
+        final int sourceWidth = bitmap.getWidth();
+        final int sourceHeight = bitmap.getHeight();
+        try {
+            InputImage image = InputImage.fromBitmap(bitmap, 0);
+            Task<Text> task = recognizer.process(image);
+            task.addOnCompleteListener(completed -> {
+                boolean handedToFallback = false;
+                try {
+                    if (destroyed) return;
+                    if (!completed.isSuccessful() || completed.getResult() == null) {
+                        logDiagnostic(expectedPackage, "OCR_MODEL_ERROR",
+                                recognizerName(recognizer) + "模型未能完成识别；尝试下一个语言模型");
+                        if (recognizerIndex + 1 < recognizers.size()) {
+                            handedToFallback = true;
+                            runOcrPass(bitmap, expectedPackage, generation, recognizers, recognizerIndex + 1);
+                        } else {
+                            logDiagnostic(expectedPackage, "OCR_ERROR",
+                                    "全部语言模型均未成功返回识别结果");
+                        }
+                        return;
+                    }
+
+                    Text result = completed.getResult();
+                    String context = result.getText() == null ? "" : result.getText();
+                    logDiagnostic(expectedPackage, "OCR_SUCCESS",
+                            recognizerName(recognizer) + "模型完成识别；文本块=" + result.getTextBlocks().size());
+                    if (TextMatcher.isCountdown(context)) {
+                        logDiagnostic(expectedPackage, "OCR_COUNTDOWN_WAIT",
+                                "OCR 图像仍检测到倒计时；保持主动扫描任务");
+                        mainHandler.post(() -> scheduleCountdownRescan(expectedPackage, generation));
+                    } else if (countdownRescanPackage != null) {
+                        logDiagnostic(expectedPackage, "OCR_COUNTDOWN_ENDED",
+                                "OCR 图像中未见倒计时，继续检查按钮是否已出现");
+                    }
+
+                    OcrCandidate best = null;
+                    int bestScore = 0;
+                    List<String> suppressedLabels = database == null
+                            ? java.util.Collections.emptyList() : database.getSuppressedLabels(expectedPackage);
+                    for (Text.TextBlock block : result.getTextBlocks()) {
+                        for (Text.Line line : block.getLines()) {
+                            String lineText = line.getText();
+                            Rect box = line.getBoundingBox();
+                            if (box == null || isSuppressedLabel(suppressedLabels, lineText)) continue;
+                            AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
+                                    lineText, context, true, true, true, box.width(), box.height(),
+                                    sourceWidth, sourceHeight,
+                                    isCountdownClickEnabled(), getMinimumSkipScore());
+                            if (assessment.score >= getMinimumSkipScore() && assessment.score > bestScore) {
+                                best = new OcrCandidate(new Rect(box), lineText, assessment.score);
+                                bestScore = assessment.score;
+                            }
+                        }
+                    }
+
+                    if (best == null) {
+                        if (recognizerIndex + 1 < recognizers.size()) {
+                            logDiagnostic(expectedPackage, "OCR_FALLBACK",
+                                    recognizerName(recognizer) + "模型未找到候选，继续使用下一个语言模型");
+                            handedToFallback = true;
+                            runOcrPass(bitmap, expectedPackage, generation, recognizers, recognizerIndex + 1);
+                        } else {
+                            logDiagnostic(expectedPackage, "OCR_NO_CANDIDATE",
+                                    "全部语言模型均未找到达到灵敏度门槛的安全候选");
+                        }
+                        return;
+                    }
+
+                    OcrCandidate selected = best;
+                    logDiagnostic(expectedPackage, "OCR_CANDIDATE",
+                            recognizerName(recognizer) + "模型发现候选，置信度=" + selected.score);
+                    mainHandler.post(() -> executeOcrCandidate(selected, context, sourceWidth,
+                            sourceHeight, expectedPackage, generation));
+                } catch (Throwable failure) {
+                    logDiagnostic(expectedPackage, "OCR_ERROR",
+                            "OCR 结果处理异常：" + failure.getClass().getSimpleName());
+                    if (!destroyed && recognizerIndex + 1 < recognizers.size()) {
+                        handedToFallback = true;
+                        runOcrPass(bitmap, expectedPackage, generation, recognizers, recognizerIndex + 1);
+                    }
+                } finally {
+                    if (!handedToFallback) {
+                        if (!bitmap.isRecycled()) bitmap.recycle();
+                        ocrInFlight = false;
+                    }
+                }
+            });
+        } catch (Throwable failure) {
+            logDiagnostic(expectedPackage, "OCR_MODEL_ERROR",
+                    recognizerName(recognizer) + "模型调用异常：" + failure.getClass().getSimpleName());
+            if (recognizerIndex + 1 < recognizers.size()) {
+                runOcrPass(bitmap, expectedPackage, generation, recognizers, recognizerIndex + 1);
+            } else {
+                if (!bitmap.isRecycled()) bitmap.recycle();
+                ocrInFlight = false;
+                logDiagnostic(expectedPackage, "OCR_ERROR", "所有语言模型均无法处理当前截图");
+            }
         }
     }
 
