@@ -46,7 +46,7 @@ public class SplashProbePolicyTest {
         assertEquals(320L, SplashProbePolicy.delayForAttempt(1, true));
         assertEquals(320L, SplashProbePolicy.ocrIntervalMs(true));
         assertEquals(1_050L, SplashProbePolicy.ocrIntervalMs(false));
-        assertTrue(SplashProbePolicy.hasMoreAttempts(11, true));
-        assertFalse(SplashProbePolicy.hasMoreAttempts(12, true));
+        assertTrue(SplashProbePolicy.hasMoreAttempts(23, true));
+        assertFalse(SplashProbePolicy.hasMoreAttempts(24, true));
     }
 }
