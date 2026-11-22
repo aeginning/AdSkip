@@ -138,6 +138,25 @@ public class DnsFeedManagerTest {
         assertTrue(waits.isEmpty());
     }
 
+    @Test public void doesNotRetryRateLimitedMirrorAndUsesFailoverOnly() throws Exception {
+        DnsFeedManager.Source source = DnsFeedManager.Source.HAGEZI_LIGHT;
+        Deque<HttpURLConnection> replies = new ArrayDeque<>();
+        for (String mirror : source.mirrorUrls) {
+            replies.add(new FakeConnection(new URL(mirror), 429, new byte[0], null, 0));
+        }
+        List<Long> waits = new ArrayList<>();
+
+        try {
+            DnsFeedManager.download(source, url -> replies.removeFirst(), waits::add, null);
+            fail("Expected rate-limit failure");
+        } catch (DnsFeedManager.DownloadException expected) {
+            assertEquals(DnsFeedManager.FailureKind.HTTP, expected.kind);
+            assertEquals(source.mirrorUrls.size(), expected.attempts);
+            assertTrue("HTTP 429 should switch mirrors without re-hitting a throttled host",
+                    waits.isEmpty());
+        }
+    }
+
     @Test public void reportsUsefulFailureAfterAllMirrorsFail() throws Exception {
         DnsFeedManager.Source source = DnsFeedManager.Source.STEVENBLACK_BASE;
         Deque<HttpURLConnection> replies = new ArrayDeque<>();
