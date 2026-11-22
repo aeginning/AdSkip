@@ -655,6 +655,24 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private Bitmap copyScreenshotBitmap(ScreenshotResult result) {
+        if (result == null) return null;
+        HardwareBuffer hardwareBuffer = result.getHardwareBuffer();
+        if (hardwareBuffer == null) return null;
+        Bitmap hardwareBitmap = null;
+        try {
+            ColorSpace colorSpace = result.getColorSpace();
+            hardwareBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, colorSpace);
+            return hardwareBitmap == null ? null : hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false);
+        } catch (Throwable ignored) {
+            return null;
+        } finally {
+            if (hardwareBitmap != null && !hardwareBitmap.isRecycled()) hardwareBitmap.recycle();
+            hardwareBuffer.close();
+        }
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void confirmOcrCandidate(String expectedLabel, Rect firstBounds,
                                      String expectedPackage, long generation, int firstScore) {
         if (ocrInFlight) return;
