@@ -141,12 +141,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     .apply();
         }
         if (pkg.equals(getPackageName())) return;
-        if (!database.isAppEnabled(pkg)) {
-            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                logDiagnostic(pkg, "APP_NOT_ENABLED", "该应用尚未在应用自动化中启用；按用户设置不执行识别或点击");
-            }
-            return;
-        }
+        if (!database.isAppEnabled(pkg)) return;
 
         long now = SystemClock.elapsedRealtime();
         if (now - lastScanAt < EVENT_INTERVAL_MS) {
