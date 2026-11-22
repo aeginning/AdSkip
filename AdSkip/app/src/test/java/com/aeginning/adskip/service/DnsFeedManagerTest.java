@@ -28,6 +28,24 @@ public class DnsFeedManagerTest {
         }
         assertTrue(DnsFeedManager.Source.HAGEZI_LIGHT.mirrorUrls.size() >= 4);
         assertTrue(DnsFeedManager.Source.STEVENBLACK_BASE.mirrorUrls.size() >= 3);
+        assertTrue(DnsFeedManager.Source.ADAWAY_HOSTS.mirrorUrls.size() >= 3);
+        assertTrue(DnsFeedManager.Source.ONEHOSTS_LITE.mirrorUrls.size() >= 3);
+        assertEquals(1, DnsFeedManager.Source.DAN_POLLOCK_HOSTS.mirrorUrls.size());
+    }
+
+    @Test public void newIndependentHostsFeedsParseWithoutChangingExistingFormats() throws Exception {
+        for (DnsFeedManager.Source source : Arrays.asList(
+                DnsFeedManager.Source.ADAWAY_HOSTS,
+                DnsFeedManager.Source.ONEHOSTS_LITE,
+                DnsFeedManager.Source.DAN_POLLOCK_HOSTS)) {
+            DnsFeedManager.DownloadedFeed result = DnsFeedManager.download(source,
+                    url -> new FakeConnection(url, 200, validHosts(), null, -1),
+                    millis -> { }, null);
+            assertEquals(source, result.source);
+            assertEquals(DnsFeedParser.Format.HOSTS, result.source.format);
+            assertEquals(1_100, result.parsed.domains.size());
+            assertEquals(source.mirrorUrls.get(0), result.downloadedFrom);
+        }
     }
 
     @Test public void switchesMirrorImmediatelyAfterConnectionReset() throws Exception {
@@ -74,7 +92,7 @@ public class DnsFeedManagerTest {
 
         assertEquals(source.mirrorUrls.size() + 1, result.attempts);
         assertEquals(source.mirrorUrls.get(0), result.downloadedFrom);
-        assertEquals(Arrays.asList(500L), waits);
+        assertEquals(Arrays.asList(1_000L), waits);
     }
 
     @Test public void rejectsHtmlAndContinuesToAnotherMirror() throws Exception {
@@ -165,6 +183,7 @@ public class DnsFeedManagerTest {
         }
         replies.add(new FakeConnection(new URL(source.mirrorUrls.get(0)), 503, new byte[0], null, 0));
         replies.add(new FakeConnection(new URL(source.mirrorUrls.get(1)), 503, new byte[0], null, 0));
+        replies.add(new FakeConnection(new URL(source.mirrorUrls.get(2)), 503, new byte[0], null, 0));
         List<Long> waits = new ArrayList<>();
 
         try {
@@ -172,8 +191,8 @@ public class DnsFeedManagerTest {
             fail("Expected DownloadException");
         } catch (DnsFeedManager.DownloadException expected) {
             assertEquals(DnsFeedManager.FailureKind.HTTP, expected.kind);
-            assertEquals(source.mirrorUrls.size() + 2, expected.attempts);
-            assertEquals(Arrays.asList(500L, 1_200L), waits);
+            assertEquals(source.mirrorUrls.size() + 3, expected.attempts);
+            assertEquals(Arrays.asList(1_000L, 2_500L, 5_000L), waits);
             assertTrue(expected.toUserMessage().contains("HTTP"));
             assertTrue(expected.toUserMessage().contains("尝试次数"));
         }
