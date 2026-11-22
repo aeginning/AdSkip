@@ -1223,13 +1223,14 @@ public final class MainActivity extends Activity {
 
     private void showLogs() {
         List<String> logs = database.getRecentLogs(100);
-        String content = logs.isEmpty() ? "暂无日志。启用无障碍服务并选择测试应用后，识别与安全拦截记录会显示在这里。"
-                : String.join("\n\n", logs);
+        String content = logs.isEmpty()
+                ? "当前还没有运行记录。先开启无障碍服务，在“应用自动化”中勾选要测试的应用，再打开该应用页面。\n\n服务连接、扫描开始、无候选、敏感区域保护、OCR 失败、安全拦截、手势结果和点击后验证都会写入本机诊断日志。"
+                : "诊断日志会说明每次未点击的原因；不会保存输入框内容或整屏 OCR 文本。\n\n" + String.join("\n\n", logs);
         TextView text = label(content, 12, 0xFF344054, false);
         text.setPadding(dp(14), dp(8), dp(14), dp(8));
         ScrollView scroll = new ScrollView(this);
         scroll.addView(text);
-        new AlertDialog.Builder(this).setTitle("最近 100 条日志")
+        new AlertDialog.Builder(this).setTitle("识别诊断与过滤日志 · 最近 100 条")
                 .setView(scroll)
                 .setNegativeButton("关闭", null)
                 .setNeutralButton("清空日志", (dialog, which) -> database.clearLogs())
