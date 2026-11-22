@@ -20,6 +20,12 @@ import com.aeginning.adskip.db.RuleDatabase;
 import com.aeginning.adskip.engine.SafetyPolicy;
 import com.aeginning.adskip.engine.TextMatcher;
 import com.aeginning.adskip.engine.AdConfidenceScorer;
+import com.aeginning.adskip.engine.SensitiveInputPolicy;
+import com.aeginning.adskip.engine.DiagnosticLogThrottle;
+import com.aeginning.adskip.engine.TargetStability;
+import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions;
 import com.google.android.gms.tasks.Task;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.text.Text;
@@ -43,8 +49,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private static final long OCR_AD_INTERVAL_MS = 850L;
     private static final long OCR_VISUAL_PROBE_INTERVAL_MS = 7_000L;
     private static final long CLICK_CONFIRM_DELAY_MS = 260L;
-    private static final long COUNTDOWN_RESCAN_INTERVAL_MS = 900L;
-    private static final int MAX_COUNTDOWN_RESCANS = 15;
+    private static final long COUNTDOWN_RESCAN_INTERVAL_MS = 700L;
+    private static final long CLICK_VERIFY_DELAY_MS = 750L;
+    private static final int MAX_COUNTDOWN_RESCANS = 24;
     private static final int OCR_MAX_DIMENSION = 1280;
     private static final int MAX_NODES = 650;
     private static final int MAX_DEPTH = 14;
@@ -57,6 +64,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private SharedPreferences.OnSharedPreferenceChangeListener overlayPreferenceListener;
     private TextRecognizer chineseRecognizer;
     private TextRecognizer latinRecognizer;
+    private TextRecognizer japaneseRecognizer;
+    private TextRecognizer koreanRecognizer;
+    private TextRecognizer devanagariRecognizer;
+    private final DiagnosticLogThrottle diagnosticThrottle = new DiagnosticLogThrottle();
+    private String lastCandidateDecisionReason = "尚未执行控件树候选判断";
     private long lastScanAt;
     private long lastClickAt;
     private long lastOcrAt;
@@ -91,6 +103,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         overlayPreferences.registerOnSharedPreferenceChangeListener(overlayPreferenceListener);
         chineseRecognizer = TextRecognition.getClient(new ChineseTextRecognizerOptions.Builder().build());
         latinRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+        japaneseRecognizer = TextRecognition.getClient(new JapaneseTextRecognizerOptions.Builder().build());
+        koreanRecognizer = TextRecognition.getClient(new KoreanTextRecognizerOptions.Builder().build());
+        devanagariRecognizer = TextRecognition.getClient(new DevanagariTextRecognizerOptions.Builder().build());
         floatingStatusOverlay.refresh(database, true, true);
     }
 
@@ -103,16 +118,19 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
                 && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return;
 
-        // Invalidate delayed actions even if Android emits a window event without a package name.
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             windowGeneration++;
             cancelPendingNodeConfirmation();
             cancelPendingCountdownRescan();
         }
+
         CharSequence packageName = event.getPackageName();
-        if (packageName == null) return;
+        if (packageName == null) {
+            logDiagnostic("", "NO_PACKAGE", "系统无障碍事件未提供目标应用包名，无法安全扫描");
+            return;
+        }
         String pkg = packageName.toString();
-        // Keep only the latest window identity (no history and no screen text) for foreground diagnostics.
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             CharSequence className = event.getClassName();
             getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
@@ -121,19 +139,39 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     .putLong("foreground_last_at", System.currentTimeMillis())
                     .apply();
         }
-        if (pkg.equals(getPackageName()) || !database.isAppEnabled(pkg)) return;
+        if (pkg.equals(getPackageName())) return;
+        if (!database.isAppEnabled(pkg)) {
+            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                logDiagnostic(pkg, "APP_NOT_ENABLED", "该应用尚未在应用自动化中启用；按用户设置不执行识别或点击");
+            }
+            return;
+        }
 
         long now = SystemClock.elapsedRealtime();
-        if (now - lastScanAt < EVENT_INTERVAL_MS) return;
+        if (now - lastScanAt < EVENT_INTERVAL_MS) {
+            logDiagnostic(pkg, "SCAN_THROTTLED", "短时间收到重复无障碍事件，已合并扫描以降低耗电");
+            return;
+        }
         lastScanAt = now;
+        logDiagnostic(pkg, "SCAN", "开始扫描当前窗口的可见控件树");
 
-        AccessibilityNodeInfo root = getRootInActiveWindow();
+        AccessibilityNodeInfo root;
+        try {
+            root = getRootInActiveWindow();
+        } catch (Throwable failure) {
+            logDiagnostic(pkg, "NO_WINDOW", "读取活动窗口失败：" + failure.getClass().getSimpleName());
+            return;
+        }
         hasSensitiveInputInCurrentWindow = false;
         nodeScanIncomplete = false;
-        if (root == null) return;
+        if (root == null) {
+            logDiagnostic(pkg, "NO_WINDOW", "Android 未提供活动窗口节点；可能是安全窗口、切换动画或应用限制");
+            return;
+        }
         CharSequence rootPackage = root.getPackageName();
         if (rootPackage == null || !pkg.contentEquals(rootPackage)) {
             recycleNode(root);
+            logDiagnostic(pkg, "WINDOW_MISMATCH", "活动窗口包名与无障碍事件不一致，已放弃本次扫描");
             return;
         }
 
@@ -143,20 +181,37 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         try {
             StringBuilder screenText = new StringBuilder();
             collectNodes(root, 0, nodes, screenText);
-            if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
+            if (hasSensitiveInputInCurrentWindow) {
+                logDiagnostic(pkg, "SENSITIVE_INPUT",
+                        "发现密码、支付码或验证码输入区域；不读取输入内容，并暂停本窗口自动点击与截图 OCR");
+                return;
+            }
+            if (nodeScanIncomplete) {
+                logDiagnostic(pkg, "SCAN_INCOMPLETE",
+                        "控件树超过安全扫描预算或节点遍历不完整；为避免遗漏风险上下文，本次不点击");
+                return;
+            }
+
             context = screenText.toString();
             if (TextMatcher.isCountdown(context)) {
+                logDiagnostic(pkg, "COUNTDOWN_WAIT", "检测到广告倒计时；启动定时主动扫描，等待跳过按钮可用");
                 scheduleCountdownRescan(pkg, windowGeneration);
             }
             candidate = chooseCandidate(nodes, context, pkg);
             if (candidate != null) {
+                logDiagnostic(pkg, "CANDIDATE", "发现候选控件，置信度=" + candidate.score + "；进入安全复核");
                 scheduleNodeConfirmation(candidate, pkg, windowGeneration, context);
             } else {
+                logDiagnostic(pkg, "NO_CANDIDATE", lastCandidateDecisionReason);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    boolean allowVisualProbe = true;
-                    maybeRunOcr(pkg, TextMatcher.hasAdContext(context), allowVisualProbe, windowGeneration);
+                    maybeRunOcr(pkg, TextMatcher.hasAdContext(context), true, windowGeneration, context);
+                } else {
+                    logDiagnostic(pkg, "OCR_UNAVAILABLE",
+                            "当前 Android 版本低于 11，无法使用无障碍截图 OCR；仅能识别控件树");
                 }
             }
+        } catch (Throwable failure) {
+            logDiagnostic(pkg, "SCAN_ERROR", "控件树扫描异常：" + failure.getClass().getSimpleName());
         } finally {
             if (candidate != null && candidate.ownsNode) recycleNode(candidate.node);
             recycleNodes(nodes);
@@ -178,13 +233,21 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         nodes.add(node);
         boolean password = node.isPassword();
         boolean editable = node.isEditable();
-        if (password || editable) hasSensitiveInputInCurrentWindow = true;
-        // Do not extract text from editable controls; password and editable-input screens also disable OCR fallback.
+        boolean sensitive = SensitiveInputPolicy.isSensitive(password, editable,
+                node.getInputType(), node.getHintText(), node.getContentDescription());
+        if (sensitive) hasSensitiveInputInCurrentWindow = true;
+
+        // Never read text values from any editable field. A normal search box is not,
+        // however, a reason to suppress scanning of unrelated buttons elsewhere.
         if (!password && !editable) {
             CharSequence label = node.getText();
             CharSequence description = node.getContentDescription();
-            if (label != null && label.length() > 0 && text.length() < 16000) text.append(label, 0, Math.min(label.length(), 16000 - text.length())).append(' ');
-            if (description != null && description.length() > 0 && text.length() < 16000) text.append(description, 0, Math.min(description.length(), 16000 - text.length())).append(' ');
+            if (label != null && label.length() > 0 && text.length() < 16000) {
+                text.append(label, 0, Math.min(label.length(), 16000 - text.length())).append(' ');
+            }
+            if (description != null && description.length() > 0 && text.length() < 16000) {
+                text.append(description, 0, Math.min(description.length(), 16000 - text.length())).append(' ');
+            }
         }
         for (int i = 0; i < node.getChildCount(); i++) {
             if (nodes.size() >= MAX_NODES) {
@@ -210,13 +273,32 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         Candidate best = null;
         int bestScore = 0;
         int minimumScore = getMinimumSkipScore();
+        int inspected = 0;
+        int emptyLabels = 0;
+        int noClickableAncestor = 0;
+        int suppressed = 0;
+        int lowConfidence = 0;
+        int unsafe = 0;
+        String firstRejection = "";
         List<String> suppressedLabels = database == null
                 ? java.util.Collections.emptyList() : database.getSuppressedLabels(packageName);
+
         for (AccessibilityNodeInfo node : nodes) {
+            inspected++;
             String label = readLabel(node);
-            if (isSuppressedLabel(suppressedLabels, label)) continue;
+            if (label.isEmpty()) {
+                emptyLabels++;
+                continue;
+            }
+            if (isSuppressedLabel(suppressedLabels, label)) {
+                suppressed++;
+                continue;
+            }
             ClickableTarget target = nearestClickable(node);
-            if (target == null) continue;
+            if (target == null) {
+                noClickableAncestor++;
+                continue;
+            }
             boolean selected = false;
             try {
                 AccessibilityNodeInfo clickable = target.node;
@@ -229,10 +311,18 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         bounds.width(), bounds.height(), width, height,
                         isCountdownClickEnabled(), minimumScore);
                 int score = assessment.score;
-                if (score <= bestScore || score < minimumScore) continue;
+                if (score <= bestScore || score < minimumScore) {
+                    lowConfidence++;
+                    if (firstRejection.isEmpty()) firstRejection = assessment.reason;
+                    continue;
+                }
                 if (!SafetyPolicy.isSafeTarget(bounds, width, height,
                         clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
-                        label, context, isCountdownClickEnabled(), minimumScore)) continue;
+                        label, context, isCountdownClickEnabled(), minimumScore)) {
+                    unsafe++;
+                    if (firstRejection.isEmpty()) firstRejection = "目标未通过最终安全区域或高风险操作策略";
+                    continue;
+                }
 
                 if (best != null && best.ownsNode) recycleNode(best.node);
                 best = new Candidate(clickable, target.owned, new Rect(bounds), label, score);
@@ -241,6 +331,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             } finally {
                 if (!selected && target.owned) recycleNode(target.node);
             }
+        }
+
+        if (best == null) {
+            lastCandidateDecisionReason = "扫描可见节点 " + inspected + " 个：空标签 " + emptyLabels
+                    + "，无可点击父控件 " + noClickableAncestor + "，用户屏蔽 " + suppressed
+                    + "，置信度不足 " + lowConfidence + "，安全策略拒绝 " + unsafe
+                    + (firstRejection.isEmpty() ? "；未发现明确的广告跳过/关闭控件" : "；首个拒绝原因：" + firstRejection);
+        } else {
+            lastCandidateDecisionReason = "发现候选控件，置信度=" + bestScore;
         }
         return best;
     }
@@ -318,6 +417,24 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
         };
         mainHandler.postDelayed(pendingNodeConfirmation, CLICK_CONFIRM_DELAY_MS);
+    }
+
+    private void logDiagnostic(String packageName, String action, String reason) {
+        if (destroyed || database == null || action == null) return;
+        String safePackage = packageName == null ? "" : packageName;
+        long interval = "SCAN".equals(action) ? 4_000L
+                : ("SCAN_THROTTLED".equals(action) ? 5_000L : 1_200L);
+        if (!diagnosticThrottle.shouldLog(safePackage + "|" + action,
+                SystemClock.elapsedRealtime(), interval)) return;
+        String safeReason = reason == null ? "" : reason.trim();
+        if (safeReason.length() > 220) safeReason = safeReason.substring(0, 220);
+        try {
+            // The diagnostic log stores only package, event code and generic reason.
+            // No screen OCR text, editable values, notifications or raw candidate labels.
+            database.log(safePackage, "诊断", action, safeReason);
+        } catch (RuntimeException ignored) {
+            // A diagnostic failure must never crash the accessibility service.
+        }
     }
 
     private void cancelPendingNodeConfirmation() {
