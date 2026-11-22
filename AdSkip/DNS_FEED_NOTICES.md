@@ -30,9 +30,10 @@ AdSkip does not bundle third-party DNS blocklist snapshots in its APK. Feed file
 ## 1Hosts Lite
 
 - Project: https://github.com/badmojr/1Hosts
-- Download format: hosts
-- Primary endpoint: https://badmojr.github.io/1Hosts/Lite/hosts.txt
-- Additional HTTPS mirrors: https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/hosts.txt ; https://cdn.jsdelivr.net/gh/badmojr/1Hosts@master/Lite/hosts.txt
+- Download format: dnsmasq
+- Primary endpoint: https://badmojr.github.io/1Hosts/Lite/dnsmasq.conf
+- Additional HTTPS mirrors: https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/dnsmasq.conf ; https://cdn.jsdelivr.net/gh/badmojr/1Hosts@master/Lite/dnsmasq.conf
+- Uses the upstream dnsmasq variant (about 102k entries in the current published list), which stays below AdSkip's 120,000-domain parser limit; the larger hosts variant is intentionally not selected.
 - The Lite variant is the compatibility-oriented list; AdSkip intentionally does not enable the more aggressive Xtra list by default.
 - Review the upstream license and current disclaimer before redistribution.
 
