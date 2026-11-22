@@ -65,16 +65,4 @@ public class DnsFeedParserTest {
         assertTrue(result.domains.contains("ads1.example.com"));
     }
 
-    private String repeatToMinimum(String row) {
-        StringBuilder result = new StringBuilder();
-        for (int i = 0; i < 1000; i++) {
-            if (row.startsWith("#")) result.append(row.replace("\n", "\n"));
-            else {
-                // Add a unique hostname in the expected file syntax.
-                if (row.startsWith("local=")) result.append("local=/host").append(i).append(".example.com/\n");
-                else result.append("0.0.0.0 host").append(i).append(".example.com\n");
-            }
-        }
-        return result.toString();
-    }
 }
