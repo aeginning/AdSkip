@@ -63,16 +63,6 @@ public final class SafetyPolicy {
                 allowCountdownSkip, minimumScore);
         return assessment.score >= Math.max(50, Math.min(95, minimumScore))
                 && !TextMatcher.isDangerous(candidateText)
-                && !isCriticalScreenContext(surroundingText);
-    }
-
-    private static boolean isCriticalScreenContext(String text) {
-        String value = AdConfidenceScorer.normalize(text);
-        String[] critical = {"付款确认", "确认购买", "支付密码", "授权", "权限申请", "支付",
-                "购买", "订阅", "下载", "安装", "登录", "注册", "permission", "allow access",
-                "install this app", "download now", "checkout", "payment", "purchase", "subscribe",
-                "sign in", "sign up", "register"};
-        for (String token : critical) if (value.contains(token)) return true;
-        return false;
+                && !TextMatcher.hasCriticalActionContext(surroundingText);
     }
 }
