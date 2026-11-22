@@ -23,8 +23,16 @@ public final class SafetyPolicy {
         if (bounds.width() < 24 || bounds.height() < 18
                 || bounds.width() > screenWidth * 0.65f
                 || bounds.height() > screenHeight * 0.25f) return false;
-        // Keep coordinate actions away from status/navigation gesture regions.
-        if (bounds.top < screenHeight * 0.025f || bounds.bottom > screenHeight * 0.96f) return false;
+        // Keep coordinate actions away from system gesture regions. An explicitly
+        // enabled, OCR-confirmed skip countdown may live in the top-right splash-ad slot.
+        boolean topRightCountdownControl = allowCountdownSkip
+                && TextMatcher.isCountdownSkipLabel(candidateText)
+                && TextMatcher.hasAdContext(surroundingText)
+                && bounds.left >= screenWidth * 0.60f
+                && bounds.top >= screenHeight * 0.01f
+                && bounds.bottom <= screenHeight * 0.12f;
+        if ((bounds.top < screenHeight * 0.025f && !topRightCountdownControl)
+                || bounds.bottom > screenHeight * 0.96f) return false;
 
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                 candidateText, surroundingText, clickable, enabled, visible,
