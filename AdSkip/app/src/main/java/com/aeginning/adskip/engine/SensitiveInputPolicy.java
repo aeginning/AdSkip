@@ -12,7 +12,7 @@ public final class SensitiveInputPolicy {
     private static final int NUMBER_VARIATION_PASSWORD = 0x010;
 
     private static final String[] SENSITIVE_HINTS = {
-            "password", "passcode", "pass phrase", "pin code", "security pin",
+            "pass phrase", "pin code", "security pin",
             "one time password", "one-time password", "otp", "verification code",
             "security code", "card number", "credit card", "cvv", "cvc",
             "口令", "支付密码", "交易密码", "验证码", "短信码",
@@ -37,12 +37,23 @@ public final class SensitiveInputPolicy {
         String normalizedDescription = normalize(contentDescription);
         // A field explicitly labelled only "密码" is sensitive; longer phrases such
         // as "搜索密码教程" are ordinary search metadata and must not block scanning.
-        if ("密码".equals(normalizedHint) || "密码".equals(normalizedDescription)) return true;
+        if ("密码".equals(normalizedHint) || "密码".equals(normalizedDescription)
+                || isExplicitPasswordHint(normalizedHint)
+                || isExplicitPasswordHint(normalizedDescription)) return true;
         String metadata = normalizedHint + " " + normalizedDescription;
         for (String token : SENSITIVE_HINTS) {
             if (metadata.contains(normalize(token))) return true;
         }
         return false;
+    }
+
+    private static boolean isExplicitPasswordHint(String value) {
+        if (value.isEmpty()) return false;
+        if ("password".equals(value) || "passcode".equals(value)
+                || "password field".equals(value) || "passcode field".equals(value)) return true;
+        return value.matches(".*\\b(?:enter|type|input|confirm|verify|retype|new|current)\\s+(?:your\\s+)?password\\b.*")
+                || value.matches(".*\\bpassword\\s+(?:required|field|entry)\\b.*");
+
     }
 
     private static String normalize(CharSequence value) {
