@@ -1,6 +1,7 @@
 package com.aeginning.adskip.engine;
 
 import java.util.Locale;
+import java.text.Normalizer;
 
 public final class TextMatcher {
     private TextMatcher() { }
@@ -98,11 +99,20 @@ public final class TextMatcher {
                 || value.matches(".*skip\\s+after\\s+\\d+\\s*(?:s|sec|seconds).*")
                 // Common splash-ad countdown labels: “跳过 3”, “跳过3秒”, “Skip 3”, “Skip 3s”.
                 || value.matches(".*(?:跳过|skip)\\s*\\d+\\s*(?:秒|s|sec|secs|second|seconds)?(?:\\s|$|[,，。.!！?？]).*")
-                || (hasAdContext(value) && value.matches(".*\\d+\\s*(?:s|sec|seconds|秒).*"));
+                || value.matches(".*\\d+\\s*秒后(?:可)?跳过.*")
+                || value.matches(".*あと\\s*\\d+\\s*秒.*")
+                || value.matches(".*\\d+\\s*秒後にスキップ.*")
+                || value.matches(".*\\d+\\s*초\\s*후\\s*건너뛰기.*")
+                || (hasAdContext(value) && value.matches(".*\\d+\\s*(?:s|sec|seconds|秒|초).*"));
     }
 
     public static String normalize(String input) {
         if (input == null) return "";
-        return input.toLowerCase(Locale.ROOT).replaceAll("[\\s\\u00a0]+", " ").trim();
+        String compatibility = Normalizer.normalize(input, Normalizer.Form.NFKC);
+        // Remove zero-width and Unicode formatting controls often injected by ad SDK labels.
+        compatibility = compatibility.replaceAll("[\\u200B-\\u200D\\u2060\\uFEFF]", "")
+                .replaceAll("\\p{Cf}", "");
+        return compatibility.toLowerCase(Locale.ROOT)
+                .replaceAll("[\\s\\u00a0]+", " ").trim();
     }
 }
