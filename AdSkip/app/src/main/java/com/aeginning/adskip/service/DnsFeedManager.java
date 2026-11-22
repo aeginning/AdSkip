@@ -74,6 +74,10 @@ public final class DnsFeedManager {
             if (status < 200 || status >= 300) {
                 throw new IOException("DNS feed server returned HTTP " + status);
             }
+            // Do not follow a redirect from the pinned HTTPS source to cleartext HTTP.
+            if (!"https".equalsIgnoreCase(connection.getURL().getProtocol())) {
+                throw new IOException("DNS feed redirect left HTTPS");
+            }
             long length = connection.getContentLengthLong();
             if (length > 12L * 1024L * 1024L) {
                 throw new IOException("DNS feed download exceeds 12 MiB");
