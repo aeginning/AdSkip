@@ -692,6 +692,154 @@ public final class MainActivity extends Activity {
     }
 
 
+    private void showDnsFeedDialog() {
+        String[] actions = {
+                "下载 / 更新 HaGeZi Multi LIGHT（轻量，建议先用）",
+                "下载 / 更新 StevenBlack Unified Hosts（覆盖更广）",
+                "管理已下载的 DNS 订阅"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("广告 DNS 规则库")
+                .setItems(actions, (dialog, which) -> {
+                    if (which == 0) {
+                        confirmDnsFeedDownload(DnsFeedManager.Source.HAGEZI_LIGHT);
+                    } else if (which == 1) {
+                        confirmDnsFeedDownload(DnsFeedManager.Source.STEVENBLACK_BASE);
+                    } else {
+                        showDnsFeedManagementDialog();
+                    }
+                })
+                .setNegativeButton("关闭", null)
+                .show();
+    }
+
+    private void confirmDnsFeedDownload(DnsFeedManager.Source source) {
+        String risk = source == DnsFeedManager.Source.HAGEZI_LIGHT
+                ? "这是偏轻量的广告与追踪域名规则，通常兼容性较好。仍可能影响部分 App 的广告、统计或个性化功能。"
+                : "这是覆盖较广的 hosts 聚合名单，不仅包含广告域名，也可能涉及恶意软件或追踪域名；误拦截风险高于轻量广告名单。建议先不要与其他大型名单同时启用。";
+        new AlertDialog.Builder(this)
+                .setTitle("下载 " + source.displayName)
+                .setMessage(source.description + "\n\n" + risk
+                        + "\n\n规则只在本机解析和保存；下载将连接该规则来源的 HTTPS 地址。更新只替换这一份订阅，不影响手工规则或其他订阅。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("下载并导入", (dialog, which) -> downloadAndInstallDnsFeed(source))
+                .show();
+    }
+
+    private void downloadAndInstallDnsFeed(DnsFeedManager.Source source) {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(8), dp(20), dp(8));
+        ProgressBar progress = new ProgressBar(this);
+        progress.setIndeterminate(true);
+        TextView status = label("正在连接规则来源并校验文件…", 13, 0xFF475467, false);
+        status.setPadding(0, dp(12), 0, 0);
+        content.addView(progress, new LinearLayout.LayoutParams(-1, dp(36)));
+        content.addView(status);
+        AlertDialog progressDialog = new AlertDialog.Builder(this)
+                .setTitle("更新 DNS 订阅")
+                .setView(content)
+                .setCancelable(false)
+                .setNegativeButton("后台继续", (d, w) -> { })
+                .create();
+        progressDialog.show();
+
+        dnsFeedExecutor.execute(() -> {
+            RuleDatabase.DnsFeedImportResult importResult = null;
+            int parsedCount = 0;
+            String feedVersion = "";
+            String failure = null;
+            try {
+                DnsFeedManager.DownloadedFeed downloaded = DnsFeedManager.download(source);
+                parsedCount = downloaded.parsed.domains.size();
+                feedVersion = downloaded.parsed.version;
+                RuleDatabase workerDb = new RuleDatabase(getApplicationContext());
+                try {
+                    importResult = workerDb.replaceDnsFeed(
+                            source.id, source.displayName, feedVersion, downloaded.parsed.domains);
+                } finally {
+                    workerDb.close();
+                }
+                if (!importResult.success) failure = importResult.error;
+            } catch (Exception error) {
+                failure = error.getClass().getSimpleName() + ": " + error.getMessage();
+            }
+
+            final int count = parsedCount;
+            final String version = feedVersion;
+            final String errorText = failure;
+            mainHandler.post(() -> {
+                if (activityDestroyed || isFinishing()) return;
+                if (progressDialog.isShowing()) progressDialog.dismiss();
+                if (errorText != null) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("DNS 订阅未更新")
+                            .setMessage(errorText + "\n\n原订阅和手工域名规则均未修改。")
+                            .setPositiveButton("知道了", null)
+                            .show();
+                    return;
+                }
+                refreshStatus();
+                String message = "已导入 " + count + " 条有效域名"
+                        + (version.isEmpty() ? "" : "（版本 " + version + "）")
+                        + "。原有手工规则和其他订阅均已保留。";
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+                showDnsFeedManagementDialog();
+            });
+        });
+    }
+
+    private void showDnsFeedManagementDialog() {
+        List<RuleDatabase.DnsFeedInfo> feeds = database.getDnsFeeds();
+        if (feeds.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("DNS 订阅")
+                    .setMessage("目前没有已下载的订阅。手工域名规则仍可在“管理 DNS 域名规则”中独立维护。")
+                    .setPositiveButton("关闭", null)
+                    .show();
+            return;
+        }
+
+        String[] labels = new String[feeds.size()];
+        for (int i = 0; i < feeds.size(); i++) labels[i] = feeds.get(i).toDisplayText();
+        new AlertDialog.Builder(this)
+                .setTitle("已下载的 DNS 订阅")
+                .setItems(labels, (dialog, which) -> showDnsFeedActions(feeds.get(which)))
+                .setNegativeButton("关闭", null)
+                .show();
+    }
+
+    private void showDnsFeedActions(RuleDatabase.DnsFeedInfo feed) {
+        String toggleLabel = feed.enabled ? "暂停此订阅" : "启用此订阅";
+        String[] actions = {toggleLabel, "删除此订阅", "关闭"};
+        new AlertDialog.Builder(this)
+                .setTitle(feed.feedName)
+                .setMessage(feed.toDisplayText() + (feed.version.isEmpty() ? "" : "\n版本：" + feed.version))
+                .setItems(actions, (dialog, which) -> {
+                    if (which == 0) {
+                        boolean updated = database.setDnsFeedEnabled(feed.feedId, !feed.enabled);
+                        Toast.makeText(this, updated ? "订阅状态已更新" : "更新订阅状态失败",
+                                Toast.LENGTH_SHORT).show();
+                        refreshStatus();
+                        showDnsFeedManagementDialog();
+                    } else if (which == 1) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("删除 DNS 订阅？")
+                                .setMessage("只删除“" + feed.feedName + "”下载的域名，不会删除手工规则或其他订阅。")
+                                .setNegativeButton("取消", null)
+                                .setPositiveButton("删除订阅", (d, w) -> {
+                                    boolean removed = database.removeDnsFeed(feed.feedId);
+                                    Toast.makeText(this, removed ? "订阅已删除" : "删除订阅失败",
+                                            Toast.LENGTH_SHORT).show();
+                                    refreshStatus();
+                                    showDnsFeedManagementDialog();
+                                }).show();
+                    }
+                })
+                .setNegativeButton("关闭", null)
+                .show();
+    }
+
     private void showAccessibilityDisclosure() {
         if (getSharedPreferences("adskip_settings", MODE_PRIVATE).getBoolean("accessibility_disclosure_accepted", false)) {
             startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
