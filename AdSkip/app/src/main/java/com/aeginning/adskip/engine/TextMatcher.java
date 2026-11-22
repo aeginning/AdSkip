@@ -106,6 +106,46 @@ public final class TextMatcher {
                 || (hasAdContext(value) && value.matches(".*\\d+\\s*(?:s|sec|seconds|秒|초).*"));
     }
 
+    /** True only for a skip control whose visible label includes its countdown number. */
+    public static boolean isCountdownSkipLabel(String text) {
+        String value = normalize(text);
+        return value.matches(".*(?:跳过|skip)\\s*\\d+\\s*(?:秒|s|sec|secs|second|seconds)?(?:\\s|$|[,，。.!！?？]).*");
+    }
+
+    /**
+     * Similarity used only to compare two observations of the same candidate.
+     * Countdown digits are intentionally ignored when both labels are skip countdowns.
+     */
+    public static int similarityPercent(String first, String second) {
+        String a = normalize(first);
+        String b = normalize(second);
+        if (a.isEmpty() || b.isEmpty()) return a.equals(b) ? 100 : 0;
+
+        if (isCountdownSkipLabel(a) && isCountdownSkipLabel(b)) {
+            boolean sameLanguage = (a.contains("跳过") && b.contains("跳过"))
+                    || (a.contains("skip") && b.contains("skip"));
+            if (sameLanguage) return 100;
+        }
+
+        int[] previous = new int[b.length() + 1];
+        int[] current = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) previous[j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            current[0] = i;
+            for (int j = 1; j <= b.length(); j++) {
+                int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+                current[j] = Math.min(Math.min(current[j - 1] + 1,
+                        previous[j] + 1), previous[j - 1] + cost);
+            }
+            int[] swap = previous;
+            previous = current;
+            current = swap;
+        }
+        int distance = previous[b.length()];
+        int length = Math.max(a.length(), b.length());
+        return Math.max(0, Math.min(100, Math.round((1f - distance / (float) length) * 100f)));
+    }
+
     public static String normalize(String input) {
         if (input == null) return "";
         String compatibility = Normalizer.normalize(input, Normalizer.Form.NFKC);
