@@ -205,11 +205,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 int height = getResources().getDisplayMetrics().heightPixels;
                 AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(label, context,
                         clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
-                        bounds.width(), bounds.height(), width, height);
+                        bounds.width(), bounds.height(), width, height, isCountdownClickEnabled());
                 int score = assessment.score;
                 if (score <= bestScore || score < 75) continue;
                 if (!SafetyPolicy.isSafeTarget(bounds, width, height,
-                        clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(), label, context)) continue;
+                        clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(), label, context,
+                        isCountdownClickEnabled())) continue;
 
                 if (best != null && best.ownsNode) recycleNode(best.node);
                 best = new Candidate(clickable, target.owned, new Rect(bounds), label, score);
@@ -261,8 +262,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
                 second = chooseCandidate(nodes, text.toString(), packageName);
                 if (second == null) return;
-                boolean sameLabel = TextMatcher.normalize(initialLabel)
-                        .equals(TextMatcher.normalize(second.label));
+                boolean sameLabel = TextMatcher.similarityPercent(initialLabel, second.label)
+                        >= getSimilarityThreshold();
                 boolean sameArea = Math.abs(initialBounds.centerX() - second.bounds.centerX()) <= 48
                         && Math.abs(initialBounds.centerY() - second.bounds.centerY()) <= 48;
                 AdConfidenceScorer.Assessment firstAssessment = new AdConfidenceScorer.Assessment(
@@ -271,10 +272,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 AdConfidenceScorer.Assessment secondAssessment = AdConfidenceScorer.assess(second.label, text.toString(),
                         second.node.isClickable(), second.node.isEnabled(), second.node.isVisibleToUser(),
                         second.bounds.width(), second.bounds.height(),
-                        getResources().getDisplayMetrics().widthPixels, getResources().getDisplayMetrics().heightPixels);
+                        getResources().getDisplayMetrics().widthPixels, getResources().getDisplayMetrics().heightPixels,
+                        isCountdownClickEnabled());
                 if (!sameLabel || !sameArea
                         || !AdConfidenceScorer.canProceedAfterSecondObservation(firstAssessment, secondAssessment)) {
-                    database.log(packageName, safeLogLabel(initialLabel), "BLOCKED", "二次识别不一致或置信度不足");
+                    database.log(packageName, safeLogLabel(initialLabel), "BLOCKED",
+                            "二次识别相似度低于 " + getSimilarityThreshold() + "%、位置不一致或置信度不足");
                     return;
                 }
                 executeNodeCandidate(second, packageName, text.toString());
@@ -400,7 +403,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (!SafetyPolicy.isSafeTarget(candidate.bounds,
                 getResources().getDisplayMetrics().widthPixels,
                 getResources().getDisplayMetrics().heightPixels,
-                candidate.node.isClickable(), candidate.node.isEnabled(), candidate.node.isVisibleToUser(), candidate.label, context)) {
+                candidate.node.isClickable(), candidate.node.isEnabled(), candidate.node.isVisibleToUser(),
+                candidate.label, context, isCountdownClickEnabled())) {
             database.log(packageName, safeLogLabel(candidate.label), "BLOCKED", "SafetyPolicy rejected node candidate");
             return;
         }
@@ -457,6 +461,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         return getSharedPreferences("adskip_settings", MODE_PRIVATE).getBoolean("ocr_enabled", true);
     }
 
+    private boolean isCountdownClickEnabled() {
+        return getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("countdown_click_enabled", false);
+    }
+
+    private int getSimilarityThreshold() {
+        return Math.max(60, Math.min(100, getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getInt("recognition_similarity_percent", 85)));
+    }
+
     private Bitmap resizeForOcr(Bitmap source) {
         int width = source.getWidth();
         int height = source.getHeight();
@@ -505,14 +519,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                     Text result = completed.getResult();
                     String context = result.getText();
+                    boolean allowCountdownClicks = isCountdownClickEnabled();
                     if (TextMatcher.isCountdown(context)) {
                         mainHandler.post(() -> scheduleCountdownRescan(expectedPackage, generation));
-                        return;
+                        if (!allowCountdownClicks) return;
+                    } else {
+                        // OCR confirms that the visual countdown is gone; stop the bounded poll loop.
+                        mainHandler.post(this::cancelPendingCountdownRescan);
                     }
-
-                    // OCR is also the authority for visual-only countdowns. Once its
-                    // second observation no longer contains a timer, stop the poll loop.
-                    mainHandler.post(this::cancelPendingCountdownRescan);
 
                     OcrCandidate best = null;
                     int bestScore = 0;
@@ -525,7 +539,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             if (box == null || isSuppressedLabel(suppressedLabels, lineText)) continue;
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                                     lineText, context, true, true, true, box.width(), box.height(),
-                                    bitmap.getWidth(), bitmap.getHeight());
+                                    bitmap.getWidth(), bitmap.getHeight(), allowCountdownClicks);
                             if (assessment.score >= 75 && assessment.score > bestScore) {
                                 best = new OcrCandidate(new Rect(box), lineText, assessment.score);
                                 bestScore = assessment.score;
@@ -576,9 +590,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 Math.round(candidate.bounds.right * scaleX),
                 Math.round(candidate.bounds.bottom * scaleY));
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(candidate.label, context,
-                true, true, true, mapped.width(), mapped.height(), screenWidth, screenHeight);
+                true, true, true, mapped.width(), mapped.height(), screenWidth, screenHeight,
+                isCountdownClickEnabled());
         if (assessment.score < 75 || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
-                true, true, true, candidate.label, context)) {
+                true, true, true, candidate.label, context, isCountdownClickEnabled())) {
             database.log(expectedPackage, safeLogLabel(candidate.label), "BLOCKED", "OCR 置信度或安全审核未通过");
             return;
         }
@@ -675,8 +690,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                     for (Text.TextBlock block : result.getTextBlocks()) {
                         for (Text.Line line : block.getLines()) {
-                            if (!TextMatcher.normalize(expectedLabel)
-                                    .equals(TextMatcher.normalize(line.getText()))) continue;
+                            if (TextMatcher.similarityPercent(expectedLabel, line.getText())
+                                    < getSimilarityThreshold()) continue;
                             if (isSuppressedLabel(suppressedLabels, line.getText())) continue;
                             Rect box = line.getBoundingBox();
                             if (box == null) continue;
@@ -689,14 +704,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                             AdConfidenceScorer.Assessment second = AdConfidenceScorer.assess(
                                     line.getText(), context, true, true, true, mapped.width(), mapped.height(),
-                                    screenWidth, screenHeight);
+                                    screenWidth, screenHeight, isCountdownClickEnabled());
                             AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                                     firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
                                             : AdConfidenceScorer.Level.REVIEW, "首次 OCR 观察");
                             if (second.score < 75
                                     || !AdConfidenceScorer.canProceedAfterSecondObservation(first, second)
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
-                                            true, true, true, line.getText(), context)) continue;
+                                            true, true, true, line.getText(), context,
+                                            isCountdownClickEnabled())) continue;
 
                             if (!isOcrEnabled() || generation != windowGeneration
                                     || !isActiveWindowSafeForTarget(expectedPackage, generation)
