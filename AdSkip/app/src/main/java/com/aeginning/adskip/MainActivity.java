@@ -70,6 +70,7 @@ public final class MainActivity extends Activity {
         buildUi();
     }
 
+    @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -300,8 +301,8 @@ public final class MainActivity extends Activity {
                 .getInt("skip_button_sensitivity", 50);
         int initialSensitivity = Math.max(0, Math.min(100, savedSensitivity));
         int initialMinimumScore = 90 - Math.round(initialSensitivity * 0.30f);
-        sensitivityLabel.setText("跳过按钮灵敏度：" + initialSensitivity
-                + "% · 触发分数 ≥ " + initialMinimumScore);
+        sensitivityLabel.setText(getString(R.string.skip_sensitivity_text,
+                initialSensitivity, initialMinimumScore));
         addGap(recognitionCard, 9);
         recognitionCard.addView(sensitivityLabel);
 
@@ -313,8 +314,8 @@ public final class MainActivity extends Activity {
         sensitivitySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 int threshold = 90 - Math.round(progress * 0.30f);
-                sensitivityLabel.setText("跳过按钮灵敏度：" + progress
-                        + "% · 触发分数 ≥ " + threshold);
+                sensitivityLabel.setText(getString(R.string.skip_sensitivity_text,
+                        progress, threshold));
                 if (fromUser) getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
                         .putInt("skip_button_sensitivity", progress).apply();
             }
@@ -331,7 +332,8 @@ public final class MainActivity extends Activity {
         int savedSimilarity = getSharedPreferences("adskip_settings", MODE_PRIVATE)
                 .getInt("recognition_similarity_percent", 85);
         int initialSimilarity = Math.max(60, Math.min(100, savedSimilarity));
-        similarityLabel.setText("二次识别文字相似度：" + initialSimilarity + "%");
+        similarityLabel.setText(getString(R.string.recognition_similarity_text,
+                initialSimilarity));
         addGap(recognitionCard, 8);
         recognitionCard.addView(similarityLabel);
 
@@ -343,7 +345,7 @@ public final class MainActivity extends Activity {
         similaritySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 int value = 60 + progress;
-                similarityLabel.setText("二次识别文字相似度：" + value + "%");
+                similarityLabel.setText(getString(R.string.recognition_similarity_text, value));
                 if (fromUser) getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
                         .putInt("recognition_similarity_percent", value).apply();
             }
