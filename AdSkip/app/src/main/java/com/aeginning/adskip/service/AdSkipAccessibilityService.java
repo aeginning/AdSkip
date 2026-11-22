@@ -967,6 +967,26 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                 best = new OcrCandidate(new Rect(box), lineText, assessment.score);
                                 bestScore = assessment.score;
                             }
+
+                            // Some close affordances are rendered as one glyph inside a
+                            // longer OCR line. Inspect individual elements without relaxing
+                            // the final ad-context and top-right geometry safety checks.
+                            for (Text.Element element : line.getElements()) {
+                                String elementText = element.getText();
+                                Rect elementBox = element.getBoundingBox();
+                                if (elementBox == null || !TextMatcher.isCloseGlyph(elementText)
+                                        || isSuppressedLabel(suppressedLabels, elementText)) continue;
+                                AdConfidenceScorer.Assessment glyphAssessment = AdConfidenceScorer.assess(
+                                        elementText, context, true, true, true,
+                                        elementBox.width(), elementBox.height(), sourceWidth, sourceHeight,
+                                        allowCountdownClicks, getMinimumSkipScore());
+                                if (glyphAssessment.score >= getMinimumSkipScore()
+                                        && glyphAssessment.score > bestScore) {
+                                    best = new OcrCandidate(new Rect(elementBox),
+                                            elementText, glyphAssessment.score);
+                                    bestScore = glyphAssessment.score;
+                                }
+                            }
                         }
                     }
 
