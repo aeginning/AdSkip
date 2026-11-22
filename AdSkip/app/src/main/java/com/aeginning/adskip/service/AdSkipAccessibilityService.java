@@ -1187,6 +1187,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     boolean allowCountdownClicks = isCountdownClickEnabled();
                     List<String> suppressedLabels = database == null
                             ? java.util.Collections.emptyList() : database.getSuppressedLabels(expectedPackage);
+                    List<String> customSkipWords = getCustomSkipWords();
                     for (Text.TextBlock block : result.getTextBlocks()) {
                         for (Text.Line line : block.getLines()) {
                             String lineText = line.getText();
@@ -1195,7 +1196,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                                     lineText, context, true, true, true, box.width(), box.height(),
                                     sourceWidth, sourceHeight,
-                                    allowCountdownClicks, getMinimumSkipScore(), getCustomSkipWords());
+                                    allowCountdownClicks, getMinimumSkipScore(), customSkipWords);
                             if (assessment.score >= getMinimumSkipScore() && assessment.score > bestScore) {
                                 best = new OcrCandidate(new Rect(box), lineText, assessment.score);
                                 bestScore = assessment.score;
@@ -1353,6 +1354,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
         int minimumScore = getMinimumSkipScore();
+        List<String> customSkipWords = getCustomSkipWords();
         float scaleX = screenWidth / (float) Math.max(1, bitmapWidth);
         float scaleY = screenHeight / (float) Math.max(1, bitmapHeight);
         Rect mapped = new Rect(
@@ -1362,7 +1364,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 Math.round(candidate.bounds.bottom * scaleY));
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(candidate.label, context,
                 true, true, true, mapped.width(), mapped.height(), screenWidth, screenHeight,
-                isCountdownClickEnabled(), minimumScore, getCustomSkipWords());
+                isCountdownClickEnabled(), minimumScore, customSkipWords);
         if (assessment.score < minimumScore || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                 true, true, true, candidate.label, context,
                 isCountdownClickEnabled(), minimumScore, getCustomSkipWords())) {
@@ -1552,6 +1554,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     String context = result.getText() == null ? "" : result.getText();
                     List<String> suppressedLabels = database == null
                             ? java.util.Collections.emptyList() : database.getSuppressedLabels(expectedPackage);
+                    List<String> customSkipWords = getCustomSkipWords();
                     int screenWidth = getResources().getDisplayMetrics().widthPixels;
                     int screenHeight = getResources().getDisplayMetrics().heightPixels;
                     float scaleX = screenWidth / (float) Math.max(1, bitmapWidth);
@@ -1591,8 +1594,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                             AdConfidenceScorer.Assessment second = AdConfidenceScorer.assess(
                                     observedLabel, context, true, true, true, mapped.width(), mapped.height(),
-                                    screenWidth, screenHeight, isCountdownClickEnabled(), getMinimumSkipScore(),
-                                    getCustomSkipWords());
+                                    screenWidth, screenHeight, isCountdownClickEnabled(), getMinimumSkipScore(), customSkipWords);
                             AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                                     firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
                                             : AdConfidenceScorer.Level.REVIEW, "首次 OCR 观察");
@@ -1602,7 +1604,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                                             true, true, true, observedLabel, context,
                                             isCountdownClickEnabled(), getMinimumSkipScore(),
-                                            getCustomSkipWords())) {
+                                            customSkipWords)) {
                                 logDiagnostic(expectedPackage, "OCR_CONFIRM_BLOCKED",
                                         "二次 OCR 文字位置匹配，但置信度或最终安全策略未通过");
                                 continue;
