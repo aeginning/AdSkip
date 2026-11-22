@@ -38,7 +38,9 @@ final class DnsPacketCodec {
             if (nextHeader == 44) { // Fragment header: only allow unfragmented atomic packets.
                 if (offset + 8 > totalLength) return null;
                 int fragment = u16(packet, offset + 2);
-                if ((fragment & 0xFFF9) != 0) return null;
+                // An atomic IPv6 fragment has zero offset, reserved bits and M flag.
+                // Reject every other Fragment header instead of ignoring the reserved bits.
+                if (fragment != 0) return null;
                 nextHeader = packet[offset];
                 offset += 8;
             } else if (nextHeader == 0 || nextHeader == 43 || nextHeader == 60 || nextHeader == 135) {
