@@ -9,12 +9,12 @@ import static org.junit.Assert.*;
 
 public class SkipWordLibraryTest {
     @Test public void parsesAndNormalizesCustomWordsInStableOrder() {
-        List<String> words = SkipWordLibrary.parse("稍后跳过\n稍后跳过\nＳｋｉｐ Ｎｏｗ\n关闭推广");
+        List<String> words = SkipWordLibrary.parse("稍后跳过\n稍后跳过\nＳｋｉｐ Ｎｏｗ\n结束推广");
         assertEquals(Arrays.asList("稍后跳过", "skip now", "关闭推广"), words);
     }
 
     @Test public void rejectsDangerousNegativeAndBuiltInDuplicates() {
-        List<String> words = SkipWordLibrary.parse("购买\n立即下载\n不可跳过\nDon't skip\n跳过广告\nSkip Ad\n稍后跳过");
+        List<String> words = SkipWordLibrary.parse("购买\n立即下载\n不可跳过\nDon't skip\n跳过广告\nSkip Ad\n结束推广\n稍后跳过");
         assertEquals(Collections.singletonList("稍后跳过"), words);
     }
 
