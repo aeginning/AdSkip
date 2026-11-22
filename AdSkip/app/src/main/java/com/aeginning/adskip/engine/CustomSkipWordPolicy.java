@@ -41,7 +41,16 @@ public final class CustomSkipWordPolicy {
         if (word.isEmpty()) return null;
         int length = word.codePointCount(0, word.length());
         if (length < 2 || length > MAX_WORD_LENGTH) return null;
-        if (!word.matches("(?s).*［\\p{L}\\p{N}].*".replace('［', '['))) return null;
+        boolean hasLetterOrDigit = false;
+        for (int offset = 0; offset < word.length();) {
+            int codePoint = word.codePointAt(offset);
+            if (Character.isLetterOrDigit(codePoint)) {
+                hasLetterOrDigit = true;
+                break;
+            }
+            offset += Character.charCount(codePoint);
+        }
+        if (!hasLetterOrDigit) return null;
         if ("skip".equals(word) || "跳过".equals(word)
                 || "close".equals(word) || "关闭".equals(word)) return null;
         if (TextMatcher.isDangerous(word) || TextMatcher.isNegativeSkip(word)
