@@ -74,9 +74,13 @@ public final class TextMatcher {
     /** Exact visual close glyphs commonly used by splash ads. Geometry and ad context
      * are verified separately by SafetyPolicy before any action is allowed. */
     public static boolean isCloseGlyph(String text) {
-        String value = normalize(text);
+        String value = normalize(text).replaceAll("[\\p{Punct}\\s]", "");
+        // Common Latin and Unicode close glyphs used by splash/video ad SDKs.
+        // The caller still requires ad context and conservative top-right geometry.
         return value.equals("x") || value.equals("×") || value.equals("✕")
-                || value.equals("✖") || value.equals("✗") || value.equals("✘");
+                || value.equals("✖") || value.equals("✗") || value.equals("✘")
+                || value.equals("╳") || value.equals("⨯") || value.equals("☓")
+                || value.equals("❎") || value.equals("❌");
     }
 
 
@@ -115,23 +119,26 @@ public final class TextMatcher {
 
     public static boolean isCountdown(String text) {
         String value = normalize(text);
-        return value.matches(".*\\bskip\\s+in\\s+\\d+(?:\\s*(?:s|sec|second|seconds))?.*")
+        return value.matches(".*\\bskip\\s+(?:in|after)\\s+\\d+.*")
+                || value.matches(".*\\b\\d+\\s*(?:s|sec|secs|second|seconds)\\s+(?:to\\s+)?skip.*")
                 || value.matches(".*\\d+\\s*(?:秒|s|sec|second|seconds)\\s*后?(?:可)?\\s*跳过.*")
-                || value.matches(".*\\d+\\s*(?:s|sec|seconds)\\s+(?:to\\s+)?skip.*")
-                || value.matches(".*skip\\s+after\\s+\\d+\\s*(?:s|sec|seconds).*")
-                // Common splash-ad countdown labels: “跳过 3”, “跳过3秒”, “Skip 3”, “Skip 3s”.
                 || value.matches(".*(?:跳过|skip)\\s*\\d+\\s*(?:秒|s|sec|secs|second|seconds)?(?:\\s|$|[,，。.!！?？]).*")
                 || value.matches(".*\\d+\\s*秒后(?:可)?跳过.*")
-                || value.matches(".*あと\\s*\\d+\\s*秒.*")
-                || value.matches(".*\\d+\\s*秒後にスキップ.*")
-                || value.matches(".*\\d+\\s*초\\s*후\\s*건너뛰기.*")
+                || value.matches(".*(?:あと\\s*\\d+\\s*秒|\\d+\\s*秒後にスキップ|スキップ\\s*\\d+).*")
+                || value.matches(".*(?:\\d+\\s*초\\s*후\\s*건너뛰기|건너뛰기\\s*\\d+).*")
+                || value.matches(".*(?:omitir|saltar|ignorer|überspringen|пропустить|تخطي)\\s*(?:en|dans|nach|через|after)?\\s*\\d+.*")
                 || (hasAdContext(value) && value.matches(".*\\d+\\s*(?:s|sec|seconds|秒|초).*"));
     }
 
-    /** True only for a skip control whose visible label includes its countdown number. */
+    /** True only for a visible skip control whose label contains a changing countdown value. */
     public static boolean isCountdownSkipLabel(String text) {
         String value = normalize(text);
-        return value.matches(".*(?:跳过|skip)\\s*\\d+\\s*(?:秒|s|sec|secs|second|seconds)?(?:\\s|$|[,，。.!！?？]).*");
+        return value.matches(".*(?:跳过|skip(?:\\s+(?:in|after))?|スキップ|건너뛰기|omitir|saltar|ignorer|überspringen|пропустить|تخطي)\\s*\\d+.*")
+                || value.matches(".*\\bskip\\s+(?:in|after)\\s+\\d+.*")
+                || value.matches(".*\\d+\\s*(?:秒|s|sec|secs|second|seconds)\\s*(?:后|to)?\\s*(?:跳过|skip).*")
+                || value.matches(".*あと\\s*\\d+\\s*秒.*")
+                || value.matches(".*\\d+\\s*秒後にスキップ.*")
+                || value.matches(".*\\d+\\s*초\\s*후\\s*건너뛰기.*");
     }
 
     /**
@@ -139,15 +146,16 @@ public final class TextMatcher {
      * Countdown digits are intentionally ignored when both labels are skip countdowns.
      */
     public static int similarityPercent(String first, String second) {
-        String a = normalize(first);
-        String b = normalize(second);
-        if (a.isEmpty() || b.isEmpty()) return a.equals(b) ? 100 : 0;
+        String rawA = normalize(first);
+        String rawB = normalize(second);
+        if (rawA.isEmpty() || rawB.isEmpty()) return rawA.equals(rawB) ? 100 : 0;
+        if (isCloseGlyph(rawA) && isCloseGlyph(rawB)) return 100;
 
-        if (isCountdownSkipLabel(a) && isCountdownSkipLabel(b)) {
-            boolean sameLanguage = (a.contains("跳过") && b.contains("跳过"))
-                    || (a.contains("skip") && b.contains("skip"));
-            if (sameLanguage) return 100;
-        }
+        // Countdown digits and units change every second; compare the stable control
+        // phrase rather than treating "Skip 4" -> "Skip" as a different button.
+        String a = stripDynamicCountdown(rawA);
+        String b = stripDynamicCountdown(rawB);
+        if (a.isEmpty() || b.isEmpty()) return rawA.equals(rawB) ? 100 : 0;
 
         int[] previous = new int[b.length() + 1];
         int[] current = new int[b.length() + 1];
@@ -165,14 +173,28 @@ public final class TextMatcher {
         }
         int distance = previous[b.length()];
         int length = Math.max(a.length(), b.length());
-        return Math.max(0, Math.min(100, Math.round((1f - distance / (float) length) * 100f)));
+        int editSimilarity = Math.max(0, Math.min(100,
+                Math.round((1f - distance / (float) length) * 100f)));
+
+        // OCR may insert/remove harmless whitespace or punctuation around short controls.
+        String compactA = a.replaceAll("[\\s\\p{Punct}，。！？、；：]", "");
+        String compactB = b.replaceAll("[\\s\\p{Punct}，。！？、；：]", "");
+        if (!compactA.isEmpty() && compactA.equals(compactB)) return 100;
+        return editSimilarity;
+    }
+
+    private static String stripDynamicCountdown(String value) {
+        if (!isCountdown(value) && !isCountdownSkipLabel(value)) return value;
+        return value.replaceAll("\\d{1,2}\\s*[:：]\\s*\\d{1,2}", " ")
+                .replaceAll("\\d+\\s*(?:秒|s|sec|secs|second|seconds|초)", " ")
+                .replaceAll("\\s+", " ").trim();
     }
 
     public static String normalize(String input) {
         if (input == null) return "";
         String compatibility = Normalizer.normalize(input, Normalizer.Form.NFKC);
         // Remove zero-width and Unicode formatting controls often injected by ad SDK labels.
-        compatibility = compatibility.replaceAll("[\\u200B-\\u200D\\u2060\\uFEFF]", "")
+        compatibility = compatibility.replaceAll("[\\u200B-\\u200D\\u2060\\uFEFF\\uFE0E\\uFE0F]", "")
                 .replaceAll("\\p{Cf}", "");
         return compatibility.toLowerCase(Locale.ROOT)
                 .replaceAll("[\\s\\u00a0]+", " ").trim();
