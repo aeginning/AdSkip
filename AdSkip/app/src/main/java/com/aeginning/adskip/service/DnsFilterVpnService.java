@@ -196,8 +196,18 @@ public final class DnsFilterVpnService extends VpnService {
 
             byte[] responsePacket = DnsPacketCodec.buildResponse(query, dnsResponse);
             if (responsePacket != null) writeTunResponse(output, responsePacket);
-        } catch (Exception ignored) {
-            // A malformed or failed individual packet must not terminate the VPN reader.
+        } catch (Exception failure) {
+            // Keep one malformed/failed request from terminating the VPN worker, but leave
+            // a throttled, non-sensitive diagnostic so repeated processing faults are visible.
+            String key = "packet-error:" + failure.getClass().getSimpleName();
+            if (shouldLogDomainEvent(key, SystemClock.elapsedRealtime()) && database != null) {
+                try {
+                    database.log("DNS", "", "ERROR",
+                            "DNS packet processing failed: " + failure.getClass().getSimpleName());
+                } catch (RuntimeException ignored) {
+                    // The service may be shutting down while its final worker exits.
+                }
+            }
         }
     }
 
