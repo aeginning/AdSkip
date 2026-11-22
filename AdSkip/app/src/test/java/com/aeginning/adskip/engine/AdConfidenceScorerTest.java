@@ -71,6 +71,12 @@ public class AdConfidenceScorerTest {
         assertTrue(permissive.score >= 60);
     }
 
+    @Test public void smallXGlyphCanPassScoringWithAdContext() {
+        AdConfidenceScorer.Assessment result = AdConfidenceScorer.assess(
+                "X", "广告来源：趣盟", true, true, true, 14, 14, 1080, 2400);
+        assertTrue(result.score >= 90);
+    }
+
     @Test public void XGlyphCanBeDetectedWhenCountdownTextAppearsElsewhere() {
         AdConfidenceScorer.Assessment result = AdConfidenceScorer.assess(
                 "×", "广告来源：趣盟 · 跳过 4", true, true, true, 40, 36, 1080, 2400,
