@@ -1,5 +1,8 @@
 package com.aeginning.adskip.engine;
 
+import java.util.Collections;
+import java.util.Set;
+
 
 /** Pure, deterministic confidence model. It never authorizes risky controls. */
 public final class AdConfidenceScorer {
@@ -38,6 +41,16 @@ public final class AdConfidenceScorer {
                                     boolean enabled, boolean visible, int targetWidth,
                                     int targetHeight, int screenWidth, int screenHeight,
                                     boolean allowCountdownSkip, int minimumScore) {
+        return assess(label, screenText, clickable, enabled, visible, targetWidth,
+                targetHeight, screenWidth, screenHeight, allowCountdownSkip,
+                minimumScore, Collections.emptySet());
+    }
+
+    public static Assessment assess(String label, String screenText, boolean clickable,
+                                    boolean enabled, boolean visible, int targetWidth,
+                                    int targetHeight, int screenWidth, int screenHeight,
+                                    boolean allowCountdownSkip, int minimumScore,
+                                    Set<String> customSkipWords) {
         String candidate = normalize(label);
         String context = normalize(screenText);
         if (candidate.isEmpty()) return result(0, "空标签");
@@ -48,6 +61,8 @@ public final class AdConfidenceScorer {
         boolean adContext = TextMatcher.hasAdContext(context);
         boolean allowedCountdownTarget = allowCountdownSkip && countdownSkipLabel && adContext;
         boolean allowedCloseGlyph = closeGlyph && adContext;
+        boolean allowedCustomWord = adContext
+                && CustomSkipWordPolicy.matches(candidate, customSkipWords);
         if ((TextMatcher.isCountdown(candidate) || TextMatcher.isCountdown(context))
                 && !allowedCountdownTarget && !allowedCloseGlyph) {
             return result(0, "页面仍处于广告倒计时，倒计时点击未启用或目标不明确");
@@ -72,6 +87,10 @@ public final class AdConfidenceScorer {
             score = 70;
         } else if (TextMatcher.isExplicitCloseAd(candidate)) {
             score = 66;
+        } else if (allowedCustomWord) {
+            // User terms are deliberately weaker than built-in explicit phrases and
+            // only count in a verified ad context. All later safety checks still apply.
+            score = 56;
         } else if (containsAny(candidate, "跳过", "skip")) {
             if (!TextMatcher.hasAdContext(context)) return result(0, "普通跳过词缺少广告上下文");
             score = 48;
