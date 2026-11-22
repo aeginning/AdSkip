@@ -119,6 +119,7 @@ final class FloatingStatusOverlay {
         }
     }
 
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
     private void createPanel() {
         panel = new LinearLayout(service);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -274,6 +275,7 @@ final class FloatingStatusOverlay {
         lastText = "";
     }
 
+    @android.annotation.SuppressLint("AppCompatCustomView")
     private static final class DragHandleView extends TextView {
         DragHandleView(Context context) { super(context); }
 
