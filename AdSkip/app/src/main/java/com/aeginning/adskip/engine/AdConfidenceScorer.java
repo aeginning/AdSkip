@@ -44,10 +44,11 @@ public final class AdConfidenceScorer {
         if (TextMatcher.isNegativeSkip(candidate)) return result(0, "目标明确表示不可跳过");
         if (TextMatcher.isDangerous(candidate)) return result(0, "目标包含敏感操作词");
         boolean countdownSkipLabel = TextMatcher.isCountdownSkipLabel(candidate);
-        boolean allowedCountdownTarget = allowCountdownSkip && countdownSkipLabel
-                && TextMatcher.hasAdContext(context);
+        boolean adContext = TextMatcher.hasAdContext(context);
+        boolean allowedCountdownTarget = allowCountdownSkip && countdownSkipLabel && adContext;
+        boolean allowedCloseGlyph = TextMatcher.isCloseGlyph(candidate) && adContext;
         if ((TextMatcher.isCountdown(candidate) || TextMatcher.isCountdown(context))
-                && !allowedCountdownTarget) {
+                && !allowedCountdownTarget && !allowedCloseGlyph) {
             return result(0, "页面仍处于广告倒计时，倒计时点击未启用或目标不明确");
         }
         if (!clickable || !enabled || !visible) return result(0, "目标不可点击或不可见");
@@ -87,11 +88,17 @@ public final class AdConfidenceScorer {
         }
         score = Math.min(100, score);
         if (score < Math.max(50, Math.min(95, minimumScore))) {
-            return result(score, "低于当前跳过按钮灵敏度门槛");
+            return result(0, "低于当前跳过按钮灵敏度门槛");
         }
         if (score >= 90) return result(score, "高置信度明确跳过按钮");
         if (score >= 75) return result(score, "需要二次识别确认");
         return result(score, "置信度不足，不自动点击");
+    }
+
+    /** Map user sensitivity (0=strict, 100=permissive) to a minimum score. */
+    public static int minimumScoreForSensitivity(int sensitivity) {
+        int bounded = Math.max(0, Math.min(100, sensitivity));
+        return 90 - Math.round(bounded * 0.30f);
     }
 
     public static boolean canProceedAfterSecondObservation(Assessment first, Assessment second) {
