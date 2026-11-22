@@ -67,4 +67,14 @@ public class TextMatcherTest {
         assertTrue(confidence("Skip now", "Sponsored advertisement") >= 75);
         assertEquals(0, confidence("Skip now", "video settings"));
     }
+
+    @Test public void splashSkipCountdownFormatsAreRejectedUntilReady() {
+        assertTrue(TextMatcher.isCountdown("跳过 3"));
+        assertTrue(TextMatcher.isCountdown("跳过3秒"));
+        assertTrue(TextMatcher.isCountdown("Skip 3"));
+        assertTrue(TextMatcher.isCountdown("Skip 3s"));
+        assertTrue(TextMatcher.isCountdown("广告 3秒后跳过"));
+        assertFalse(TextMatcher.isCountdown("跳过"));
+        assertTrue(confidence("跳过", "广告来源：趣盟") >= 75);
+    }
 }
