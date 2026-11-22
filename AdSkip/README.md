@@ -142,7 +142,8 @@ AdSkip/
 │   │   ├── db/RuleDatabase.java
 │   │   ├── engine/
 │   │   │   ├── AdConfidenceScorer.java
-│   │   ├── DnsFeedParser.java
+│   │   │   │   ├── DnsFeedParser.java
+│   │   │   ├── DomainRuleValidator.java
 │   │   │   ├── SafetyPolicy.java
 │   │   │   └── TextMatcher.java
 │   │   ├── privilege/
