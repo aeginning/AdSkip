@@ -150,7 +150,6 @@
 ```text
 AdSkip/
 ├── app/
-├── app/
 │   ├── src/main/aidl/com/aeginning/adskip/privilege/IAdSkipShellService.aidl
 │   ├── src/main/java/com/aeginning/adskip/
 │   │   ├── MainActivity.java
