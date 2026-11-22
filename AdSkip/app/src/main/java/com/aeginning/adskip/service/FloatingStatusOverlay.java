@@ -14,6 +14,7 @@ import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.aeginning.adskip.R;
 import com.aeginning.adskip.db.RuleDatabase;
 
 /**
@@ -95,8 +96,6 @@ final class FloatingStatusOverlay {
         if (!text.equals(lastText)) {
             lastText = text;
             details.setText(text);
-            // Keep the header neutral; all dynamic status rows obey their individual toggles.
-            title.setText("AdSkip  ·  状态");
             if (expanded) details.setVisibility(View.VISIBLE);
             panel.requestLayout();
             updatePanelLayout();
@@ -133,8 +132,8 @@ final class FloatingStatusOverlay {
         header.setGravity(Gravity.CENTER_VERTICAL);
         panel.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
-        title = new TextView(service);
-        title.setText("AdSkip  ·  状态");
+        title = new DragHandleView(service);
+        title.setText(service.getString(R.string.floating_overlay_title));
         title.setTextColor(0xFFFFFFFF);
         title.setTextSize(12);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
@@ -143,16 +142,12 @@ final class FloatingStatusOverlay {
         title.setContentDescription("拖动此处移动悬浮窗");
         header.addView(title, new LinearLayout.LayoutParams(0, dp(34), 1f));
         title.setOnTouchListener(this::handleDrag);
+        title.setOnClickListener(view -> toggleExpanded());
 
         collapseButton = headerButton("−");
         header.addView(collapseButton);
         collapseButton.setContentDescription("收起或展开悬浮窗内容");
-        collapseButton.setOnClickListener(view -> {
-            expanded = !expanded;
-            details.setVisibility(expanded ? View.VISIBLE : View.GONE);
-            collapseButton.setText(expanded ? "−" : "+");
-            updatePanelLayout();
-        });
+        collapseButton.setOnClickListener(view -> toggleExpanded());
 
         TextView closeButton = headerButton("×");
         header.addView(closeButton);
@@ -175,13 +170,20 @@ final class FloatingStatusOverlay {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
-        layoutParams.gravity = Gravity.TOP | Gravity.LEFT;
+        layoutParams.gravity = Gravity.TOP | Gravity.START;
         layoutParams.x = Math.max(0, preferences.getInt(PREF_X, dp(12)));
         layoutParams.y = Math.max(0, preferences.getInt(PREF_Y, dp(120)));
         if (!expanded) {
             details.setVisibility(View.GONE);
             collapseButton.setText("+");
         }
+    }
+
+    private void toggleExpanded() {
+        expanded = !expanded;
+        details.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        collapseButton.setText(expanded ? "−" : "+");
+        updatePanelLayout();
     }
 
     private TextView headerButton(String value) {
@@ -220,6 +222,14 @@ final class FloatingStatusOverlay {
                 }
                 return true;
             case MotionEvent.ACTION_UP:
+                if (dragging) {
+                    preferences.edit().putInt(PREF_X, layoutParams.x)
+                            .putInt(PREF_Y, layoutParams.y).apply();
+                } else {
+                    view.performClick();
+                }
+                dragging = false;
+                return true;
             case MotionEvent.ACTION_CANCEL:
                 if (dragging) {
                     preferences.edit().putInt(PREF_X, layoutParams.x)
@@ -262,6 +272,15 @@ final class FloatingStatusOverlay {
         collapseButton = null;
         layoutParams = null;
         lastText = "";
+    }
+
+    private static final class DragHandleView extends TextView {
+        DragHandleView(Context context) { super(context); }
+
+        @Override public boolean performClick() {
+            super.performClick();
+            return true;
+        }
     }
 
     private GradientDrawable background(int fill, int stroke, int radiusDp) {
