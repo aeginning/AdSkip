@@ -14,7 +14,7 @@ public final class TextMatcher {
             "禁止跳过", "无需跳过", "不允许跳过", "不支持跳过",
             "暂不可跳过", "尚不可跳过", "当前广告不可跳过", "此广告不可跳过",
             "不可跳过此广告", "跳过广告不可用", "跳过按钮不可用", "广告暂不可跳过",
-            "skip not available", "skip unavailable", "ad is not skippable",
+            "skip not available", "ad is not skippable",
             "this ad is not skippable", "ad cannot be skipped", "skip button disabled",
             "広告をスキップできません", "広告はスキップできません",
             "광고를 건너뛸 수 없습니다"
@@ -22,7 +22,7 @@ public final class TextMatcher {
     private static final String[] AD_CONTEXT = {
             "广告", "赞助内容", "推广内容", "广告倒计时", "广告播放中",
             "赞助广告", "推广广告", "商业推广", "sponsored", "sponsored content",
-            "promoted content", "advertisement", "advertising", "ad content", "广告", "広告", "광고", "秒后跳过"
+            "promoted content", "advertisement", "advertising", "ad content", "広告", "광고", "秒后跳过"
     };
 
     private static final String[] EXPLICIT_SKIP_AD = {
