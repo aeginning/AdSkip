@@ -263,7 +263,7 @@ public final class MainActivity extends Activity {
         LinearLayout recognitionCard = card(root);
         recognitionCard.addView(label("识别灵敏度与倒计时", 18, 0xFF172033, true));
         TextView recognitionHint = label(
-                "倒计时点击仅针对明确呈现“跳过 + 数字”的广告控件；相似度用于比较前后两次识别文字，不会降低危险操作拦截或最低置信度门槛。",
+                "倒计时点击仅针对明确呈现“跳过 + 数字”的广告控件；相似度比较前后两次文字；灵敏度控制候选触发门槛。X 仅在广告右上角小型关闭区域识别。",
                 12, 0xFF7A8495, false);
         recognitionHint.setLineSpacing(dp(3), 1.0f);
         addGap(recognitionCard, 5);
@@ -281,6 +281,51 @@ public final class MainActivity extends Activity {
                         .putBoolean("countdown_click_enabled", checked).apply());
         addGap(recognitionCard, 6);
         recognitionCard.addView(countdownClickSwitch);
+
+        android.widget.Switch secondConfirmationSwitch = new android.widget.Switch(this);
+        secondConfirmationSwitch.setText("启用二次识别确认（关闭后更快，但误触风险更高）");
+        secondConfirmationSwitch.setTextSize(14);
+        secondConfirmationSwitch.setTextColor(0xFF344054);
+        secondConfirmationSwitch.setPadding(0, dp(8), 0, dp(4));
+        secondConfirmationSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("second_confirmation_enabled", true));
+        secondConfirmationSwitch.setOnCheckedChangeListener((buttonView, checked) ->
+                getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putBoolean("second_confirmation_enabled", checked).apply());
+        addGap(recognitionCard, 4);
+        recognitionCard.addView(secondConfirmationSwitch);
+
+        TextView sensitivityLabel = label("", 13, 0xFF344054, true);
+        int savedSensitivity = getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getInt("skip_button_sensitivity", 50);
+        int initialSensitivity = Math.max(0, Math.min(100, savedSensitivity));
+        int initialMinimumScore = 90 - Math.round(initialSensitivity * 0.30f);
+        sensitivityLabel.setText("跳过按钮灵敏度：" + initialSensitivity
+                + "% · 触发分数 ≥ " + initialMinimumScore);
+        addGap(recognitionCard, 9);
+        recognitionCard.addView(sensitivityLabel);
+
+        SeekBar sensitivitySeekBar = new SeekBar(this);
+        sensitivitySeekBar.setMax(100);
+        sensitivitySeekBar.setProgress(initialSensitivity);
+        sensitivitySeekBar.setContentDescription("跳过按钮灵敏度，0 到 100，数值越高越容易触发");
+        recognitionCard.addView(sensitivitySeekBar, new LinearLayout.LayoutParams(-1, dp(42)));
+        sensitivitySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int threshold = 90 - Math.round(progress * 0.30f);
+                sensitivityLabel.setText("跳过按钮灵敏度：" + progress
+                        + "% · 触发分数 ≥ " + threshold);
+                if (fromUser) getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putInt("skip_button_sensitivity", progress).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+        TextView sensitivityHint = label(
+                "灵敏度越高，越容易接受普通“跳过”及 OCR 结果；越低越严格。无论如何，广告上下文、控件几何位置、危险操作屏蔽仍然生效。",
+                11, 0xFF7A8495, false);
+        addGap(recognitionCard, 3);
+        recognitionCard.addView(sensitivityHint);
 
         TextView similarityLabel = label("", 13, 0xFF344054, true);
         int savedSimilarity = getSharedPreferences("adskip_settings", MODE_PRIVATE)
