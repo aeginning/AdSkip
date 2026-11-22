@@ -24,6 +24,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -255,6 +256,60 @@ public final class MainActivity extends Activity {
                         .edit().putBoolean("ocr_enabled", checked).apply());
         addGap(ocrCard, 7);
         ocrCard.addView(ocrSwitch);
+
+        addGap(root, 14);
+
+        // Optional countdown clicking and configurable second-observation text similarity.
+        LinearLayout recognitionCard = card(root);
+        recognitionCard.addView(label("识别灵敏度与倒计时", 18, 0xFF172033, true));
+        TextView recognitionHint = label(
+                "倒计时点击仅针对明确呈现“跳过 + 数字”的广告控件；相似度用于比较前后两次识别文字，不会降低危险操作拦截或最低置信度门槛。",
+                12, 0xFF7A8495, false);
+        recognitionHint.setLineSpacing(dp(3), 1.0f);
+        addGap(recognitionCard, 5);
+        recognitionCard.addView(recognitionHint);
+
+        android.widget.Switch countdownClickSwitch = new android.widget.Switch(this);
+        countdownClickSwitch.setText("倒计时期间也尝试点击“跳过”");
+        countdownClickSwitch.setTextSize(14);
+        countdownClickSwitch.setTextColor(0xFF344054);
+        countdownClickSwitch.setPadding(0, dp(8), 0, dp(4));
+        countdownClickSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("countdown_click_enabled", false));
+        countdownClickSwitch.setOnCheckedChangeListener((buttonView, checked) ->
+                getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putBoolean("countdown_click_enabled", checked).apply());
+        addGap(recognitionCard, 6);
+        recognitionCard.addView(countdownClickSwitch);
+
+        TextView similarityLabel = label("", 13, 0xFF344054, true);
+        int savedSimilarity = getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getInt("recognition_similarity_percent", 85);
+        int initialSimilarity = Math.max(60, Math.min(100, savedSimilarity));
+        similarityLabel.setText("二次识别文字相似度：" + initialSimilarity + "%");
+        addGap(recognitionCard, 8);
+        recognitionCard.addView(similarityLabel);
+
+        SeekBar similaritySeekBar = new SeekBar(this);
+        similaritySeekBar.setMax(40);
+        similaritySeekBar.setProgress(initialSimilarity - 60);
+        similaritySeekBar.setContentDescription("二次识别文字相似度，60% 到 100%");
+        recognitionCard.addView(similaritySeekBar, new LinearLayout.LayoutParams(-1, dp(42)));
+        similaritySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int value = 60 + progress;
+                similarityLabel.setText("二次识别文字相似度：" + value + "%");
+                if (fromUser) getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putInt("recognition_similarity_percent", value).apply();
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { }
+        });
+        TextView similarityHint = label(
+                "建议 85%：调低更容易容忍 OCR 识别差异，但可能增加误匹配；调高更严格。范围 60%–100%。",
+                11, 0xFF7A8495, false);
+        addGap(recognitionCard, 3);
+        recognitionCard.addView(similarityHint);
 
         addGap(root, 14);
 
