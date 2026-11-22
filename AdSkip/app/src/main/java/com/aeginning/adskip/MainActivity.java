@@ -525,21 +525,27 @@ public final class MainActivity extends Activity {
             if (seenPackages.add(info.activityInfo.packageName)) filtered.add(info);
         }
 
-        // Constrain the custom content before the dialog is shown. Previously the
-        // height was changed from OnShowListener, causing a full-height first layout
-        // followed by a second layout that visibly shrank the dialog.
+        // Keep the complete dialog within the usable screen area. The explanatory
+        // text and app list share one bounded custom panel; only the list scrolls.
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
-        int maxListHeight = Math.min(dp(360), Math.max(dp(180), (int) (screenHeight * 0.42f)));
+        int maxListHeight = Math.min(dp(300), Math.max(dp(160), (int) (screenHeight * 0.34f)));
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(4), dp(20), dp(4));
+
+        TextView description = label(
+                "仅列出桌面启动器应用。勾选需要启用的应用；顶部可全选或取消全选。",
+                14, 0xFF475467, false);
+        description.setLineSpacing(dp(2), 1.0f);
+        content.addView(description, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
+        scroll.setFillViewport(false);
         scroll.setVerticalScrollBarEnabled(true);
-
-        FrameLayout listContainer = new FrameLayout(this);
-        listContainer.setLayoutParams(new ViewGroup.LayoutParams(
+        scroll.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, maxListHeight));
-        listContainer.addView(scroll, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -597,10 +603,10 @@ public final class MainActivity extends Activity {
         }
 
         scroll.addView(list);
+        content.addView(scroll);
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("选择启用自动跳广告的应用")
-                .setMessage("仅列出桌面启动器应用。勾选需要启用的应用；顶部可全选或取消全选。")
-                .setView(listContainer)
+                .setView(content)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存", (ignored, which) -> {
                     List<String> packages = new ArrayList<>(checks.size());
