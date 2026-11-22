@@ -319,11 +319,11 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         }
     }
 
+    /** Fast approximate total using indexed/manual count plus stored subscription counts. */
     public synchronized int getActiveDomainRuleCount() {
         try (Cursor c = getReadableDatabase().rawQuery(
-                "SELECT COUNT(*) FROM (SELECT domain FROM domain_rules WHERE enabled=1 "
-                        + "UNION SELECT r.domain FROM dns_subscription_rules r "
-                        + "INNER JOIN dns_subscriptions s ON s.feed_id=r.feed_id WHERE s.enabled=1)", null)) {
+                "SELECT (SELECT COUNT(*) FROM domain_rules WHERE enabled=1) + "
+                        + "(SELECT COALESCE(SUM(rule_count), 0) FROM dns_subscriptions WHERE enabled=1)", null)) {
             return c.moveToFirst() ? c.getInt(0) : 0;
         }
     }
