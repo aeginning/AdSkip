@@ -639,6 +639,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     && database != null && database.isAppEnabled(expectedPackage)
                     && !database.isLabelSuppressed(expectedPackage, candidate.label)
                     && isActiveWindowSafeForTarget(expectedPackage, generation)
+                    && SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
+                            true, true, true, candidate.label, context,
+                            isCountdownClickEnabled(), minimumScore)
                     && SystemClock.elapsedRealtime() - lastClickAt >= CLICK_COOLDOWN_MS
                     && dispatchTap(mapped.centerX(), mapped.centerY())) {
                 lastClickAt = SystemClock.elapsedRealtime();
