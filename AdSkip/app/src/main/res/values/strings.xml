@@ -17,4 +17,5 @@ DNS 过滤：%2$s</string>
     <string name="dns_status_empty">当前没有启用规则（手工 %1$d 条，订阅启用 %2$d/%3$d 个）。请先添加手工域名或下载规则库。</string>
     <string name="skip_sensitivity_text">跳过按钮灵敏度：%1$d%% · 触发分数 ≥ %2$d</string>
     <string name="recognition_similarity_text">二次识别文字相似度：%1$d%%</string>
+    <string name="floating_overlay_title">AdSkip · 状态</string>
 </resources>
