@@ -32,8 +32,8 @@ public final class SafetyPolicy {
         int minWidth = closeGlyphCandidate ? 12 : 24;
         int minHeight = closeGlyphCandidate ? 12 : 18;
         if (bounds.width() < minWidth || bounds.height() < minHeight
-                || bounds.width() > screenWidth * (closeGlyphCandidate ? 0.16f : 0.65f)
-                || bounds.height() > screenHeight * (closeGlyphCandidate ? 0.10f : 0.25f)) return false;
+                || bounds.width() > screenWidth * (closeGlyphCandidate ? 0.22f : 0.65f)
+                || bounds.height() > screenHeight * (closeGlyphCandidate ? 0.16f : 0.25f)) return false;
         // Keep coordinate actions away from system gesture regions. An explicitly
         // enabled, OCR-confirmed skip countdown may live in the top-right splash-ad slot.
         boolean adContext = TextMatcher.hasAdContext(surroundingText);
