@@ -40,10 +40,10 @@ final class FloatingStatusOverlay {
     static final String PREF_X = "floating_overlay_x";
     static final String PREF_Y = "floating_overlay_y";
 
-    static final int DEFAULT_WIDTH_DP = 188;
+    static final int DEFAULT_WIDTH_DP = 178;
     static final int MIN_WIDTH_DP = 150;
     static final int MAX_WIDTH_DP = 320;
-    static final int DEFAULT_HEIGHT_DP = 210;
+    static final int DEFAULT_HEIGHT_DP = 190;
     static final int MIN_HEIGHT_DP = 120;
     static final int MAX_HEIGHT_DP = 460;
     static final int DEFAULT_TEXT_SIZE_SP = 10;
@@ -94,7 +94,11 @@ final class FloatingStatusOverlay {
 
         int enabledApps = 0;
         int dnsRules = 0;
-        RuleDatabase.Stats24h stats = null;
+        int clicks24h = 0;
+        int safetyBlocks24h = 0;
+        int dnsBlocks24h = 0;
+        int noAction24h = 0;
+        int errors24h = 0;
         if (database != null) {
             try {
                 enabledApps = database.getEnabledApps().size();
@@ -103,10 +107,14 @@ final class FloatingStatusOverlay {
                 dnsRules = database.getActiveDomainRuleCount();
             } catch (RuntimeException ignored) { }
             try {
-                stats = database.getStats24h();
+                RuleDatabase.Stats24h stats = database.getStats24h();
+                clicks24h = stats.clickCount;
+                safetyBlocks24h = stats.blockedCount;
+                dnsBlocks24h = stats.dnsBlockCount;
+                noAction24h = stats.noActionCount;
+                errors24h = stats.errorCount;
             } catch (RuntimeException ignored) { }
         }
-        if (stats == null) stats = new RuleDatabase.Stats24h(0, 0, 0, 0, 0);
 
         String skipStatus = !serviceAvailable ? "未运行"
                 : enabledApps > 0 ? "已启用" : "等待选择应用";
@@ -117,13 +125,13 @@ final class FloatingStatusOverlay {
                 preferences.getBoolean(PREF_SHOW_SKIP, true), skipStatus,
                 preferences.getBoolean(PREF_SHOW_APPS, true), enabledApps,
                 preferences.getBoolean(PREF_SHOW_DNS, true), dnsStatus,
-                preferences.getBoolean(PREF_SHOW_CLICKS, true), stats.clickCount,
+                preferences.getBoolean(PREF_SHOW_CLICKS, true), clicks24h,
                 preferences.getBoolean(PREF_SHOW_OCR, true), ocrStatus,
                 preferences.getBoolean(PREF_SHOW_DNS_RULES, true), dnsRules,
-                preferences.getBoolean(PREF_SHOW_SAFETY_BLOCKS, true), stats.blockedCount,
-                preferences.getBoolean(PREF_SHOW_DNS_BLOCKS, true), stats.dnsBlockCount,
-                preferences.getBoolean(PREF_SHOW_NO_ACTION, false), stats.noActionCount,
-                preferences.getBoolean(PREF_SHOW_ERRORS, false), stats.errorCount);
+                preferences.getBoolean(PREF_SHOW_SAFETY_BLOCKS, true), safetyBlocks24h,
+                preferences.getBoolean(PREF_SHOW_DNS_BLOCKS, true), dnsBlocks24h,
+                preferences.getBoolean(PREF_SHOW_NO_ACTION, false), noAction24h,
+                preferences.getBoolean(PREF_SHOW_ERRORS, false), errors24h);
 
         if (!attached) ensurePanel();
         if (!attached) return;
