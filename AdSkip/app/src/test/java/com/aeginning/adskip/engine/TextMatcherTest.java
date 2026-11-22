@@ -171,14 +171,17 @@ public class TextMatcherTest {
                 96, 36, 1080, 2400, false, 75, custom).score);
     }
 
-    @Test public void customSkipWordsMustPassFinalGeometryAndSafetyPolicy() {
+    @Test public void customSkipWordsNeverOverrideDangerousCandidateLabels() {
         java.util.List<String> custom = SkipWordLibrary.parse("稍后略过");
-        assertTrue(SafetyPolicy.isSafeTarget(new android.graphics.Rect(100, 100, 196, 136),
-                1080, 2400, true, true, true, "稍后略过", "正在播放广告",
-                false, 75, custom));
-        assertFalse(SafetyPolicy.isSafeTarget(new android.graphics.Rect(100, 100, 196, 136),
-                1080, 2400, true, true, true, "稍后略过", "广告 · 支付密码",
-                false, 75, custom));
+        assertEquals(0, AdConfidenceScorer.assess(
+                "立即购买稍后略过", "广告播放中", true, true, true,
+                96, 36, 1080, 2400, false, 60, custom).score);
+        assertEquals(0, AdConfidenceScorer.assess(
+                "立即下载稍后略过", "广告播放中", true, true, true,
+                96, 36, 1080, 2400, false, 60, custom).score);
+        assertEquals(0, AdConfidenceScorer.assess(
+                "稍后略过", "广告页面 · 支付密码", true, true, true,
+                96, 36, 1080, 2400, false, 60, custom).score);
     }
 
     @Test public void normalizesFullWidthAndZeroWidthAdLabels() {
