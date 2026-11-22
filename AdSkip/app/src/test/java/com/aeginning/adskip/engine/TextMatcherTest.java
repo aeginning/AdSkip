@@ -45,4 +45,26 @@ public class TextMatcherTest {
         assertTrue(TextMatcher.isNegativeSkip("Do not skip this advertisement"));
         assertTrue(TextMatcher.isNegativeSkip("不允许跳过"));
     }
+
+    @Test public void additionalExplicitAdLabelsAreRecognized() {
+        assertTrue(confidence("跳过此广告", "广告播放中") >= 90);
+        assertTrue(confidence("跳过当前视频广告", "正在播放") >= 90);
+        assertTrue(confidence("关闭此广告", "普通页面") >= 75);
+        assertTrue(confidence("Dismiss this ad", "sponsored video") >= 90);
+        assertTrue(confidence("広告をスキップ", "広告") >= 90);
+        assertTrue(confidence("광고 건너뛰기", "sponsored content") >= 90);
+    }
+
+    @Test public void newNegativeAndCommercialActionsRemainBlocked() {
+        assertEquals(0, confidence("当前广告不可跳过", "广告"));
+        assertEquals(0, confidence("Skip unavailable", "advertisement"));
+        assertEquals(0, confidence("立即领取优惠券", "广告"));
+        assertEquals(0, confidence("查看详情", "sponsored content"));
+        assertEquals(0, confidence("구매", "광고"));
+    }
+
+    @Test public void vagueSkipNowStillRequiresAdContext() {
+        assertTrue(confidence("Skip now", "Sponsored advertisement") >= 75);
+        assertEquals(0, confidence("Skip now", "video settings"));
+    }
 }
