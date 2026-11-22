@@ -78,7 +78,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         floatingStatusOverlay = new FloatingStatusOverlay(this);
         overlayPreferences = getSharedPreferences("adskip_settings", MODE_PRIVATE);
         overlayPreferenceListener = (preferences, key) -> {
-            if (key != null && (key.startsWith("floating_overlay_") || "dns_active".equals(key))
+            if (key != null && (key.startsWith("floating_overlay_")
+                    || "dns_active".equals(key) || "ocr_enabled".equals(key))
                     && floatingStatusOverlay != null) {
                 mainHandler.post(() -> {
                     if (!destroyed && floatingStatusOverlay != null) {
