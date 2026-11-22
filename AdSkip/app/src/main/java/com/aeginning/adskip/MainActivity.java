@@ -33,6 +33,8 @@ import android.widget.Toast;
 import com.aeginning.adskip.db.RuleDatabase;
 import com.aeginning.adskip.service.DnsFilterVpnService;
 import com.aeginning.adskip.service.DnsFeedManager;
+import com.aeginning.adskip.engine.TextMatcher;
+import com.aeginning.adskip.engine.SkipWordLibrary;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -367,6 +369,18 @@ public final class MainActivity extends Activity {
         extremeModeHint.setLineSpacing(dp(3), 1.0f);
         addGap(recognitionCard, 2);
         recognitionCard.addView(extremeModeHint);
+
+        Button defaultWordsButton = button("查看默认跳过词库", 0xFFF0F3F8);
+        defaultWordsButton.setTextColor(0xFF344054);
+        addGap(recognitionCard, 8);
+        recognitionCard.addView(defaultWordsButton, new LinearLayout.LayoutParams(-1, dp(46)));
+        defaultWordsButton.setOnClickListener(v -> showDefaultSkipWordsDialog());
+
+        Button customWordsButton = button("管理自定义跳过词库", 0xFFEAF0FF);
+        customWordsButton.setTextColor(0xFF245BDB);
+        addGap(recognitionCard, 7);
+        recognitionCard.addView(customWordsButton, new LinearLayout.LayoutParams(-1, dp(46)));
+        customWordsButton.setOnClickListener(v -> showCustomSkipWordsDialog());
 
         android.widget.Switch countdownClickSwitch = new android.widget.Switch(this);
         countdownClickSwitch.setText("倒计时期间也尝试点击“跳过”");
@@ -1179,6 +1193,141 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
+
+    private void showDefaultSkipWordsDialog() {
+        StringBuilder content = new StringBuilder();
+        content.append("以下为内置只读词库。默认词条始终保留，不会被自定义词库覆盖或删除。\n")
+                .append("通用“跳过 / Skip”和“关闭 / Close”只有在页面存在广告上下文时才会进入识别。倒计时是否允许提前点击仍由独立开关控制。\n\n");
+        appendWordSection(content, "明确跳过广告", TextMatcher.getDefaultExplicitSkipAdWords());
+        appendWordSection(content, "明确关闭广告", TextMatcher.getDefaultExplicitCloseAdWords());
+        appendWordSection(content, "通用跳过词（需要广告上下文）", TextMatcher.getDefaultGenericSkipWords());
+        appendWordSection(content, "通用关闭词（需要广告上下文）", TextMatcher.getDefaultGenericCloseWords());
+        appendWordSection(content, "广告右上角关闭符号（还需位置校验）",
+                TextMatcher.getDefaultCloseGlyphWords());
+        content.append("倒计时识别：中文“跳过 + 数字 / 数字秒后跳过”、英文“Skip + 数字 / Skip in N seconds”，并兼容日文、韩文、西班牙语、法语、德语、俄语和阿拉伯语常见格式。");
+        TextView text = label(content.toString(), 13, 0xFF344054, false);
+        text.setPadding(dp(8), dp(8), dp(8), dp(8));
+        text.setTextIsSelectable(true);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.addView(text);
+        new AlertDialog.Builder(this).setTitle("默认跳过词库（内置 · 只读）")
+                .setView(scroll).setPositiveButton("关闭", null).show();
+    }
+
+    private void appendWordSection(StringBuilder content, String title, String[] words) {
+        content.append(title).append("（").append(words.length).append("）\n");
+        content.append(String.join("、", words)).append("\n\n");
+    }
+
+    private void showCustomSkipWordsDialog() {
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16), dp(8), dp(16), dp(8));
+
+        TextView hint = label(
+                "添加应用中实际出现的跳过按钮文案，每行一条，也可用分号分隔。自定义词条只在检测到广告上下文时参与候选评分；危险词、否定词、默认词重复项和无效长度会被拒绝。最多保存 100 条，每条 2–48 个字符。",
+                12, 0xFF667085, false);
+        hint.setLineSpacing(dp(3), 1.0f);
+        content.addView(hint);
+
+        EditText input = new EditText(this);
+        input.setGravity(Gravity.TOP | Gravity.START);
+        input.setMinLines(2);
+        input.setMaxLines(4);
+        input.setHint("例如：稍后略过\n关闭推广");
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(-1, -2);
+        inputParams.topMargin = dp(8);
+        content.addView(input, inputParams);
+
+        TextView summary = label("", 12, 0xFF475467, true);
+        LinearLayout.LayoutParams summaryParams = new LinearLayout.LayoutParams(-1, -2);
+        summaryParams.topMargin = dp(8);
+        content.addView(summary, summaryParams);
+
+        LinearLayout wordList = new LinearLayout(this);
+        wordList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(-1, -2);
+        listParams.topMargin = dp(6);
+        content.addView(wordList, listParams);
+
+        List<String> words = loadCustomSkipWords();
+        refreshCustomSkipWordList(wordList, summary, words);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.addView(content);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("自定义跳过词库")
+                .setView(scroll)
+                .setNegativeButton("关闭", null)
+                .setNeutralButton("添加词条", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+                .setOnClickListener(v -> {
+                    String raw = input.getText() == null ? "" : input.getText().toString();
+                    List<String> before = loadCustomSkipWords();
+                    List<String> merged = SkipWordLibrary.merge(before, raw);
+                    if (merged.size() == before.size()) {
+                        Toast.makeText(this,
+                                "没有新增词条：请检查是否重复、已属于默认词库或包含危险/否定词",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    int added = merged.size() - before.size();
+                    getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                            .putString("custom_skip_words", SkipWordLibrary.serialize(merged)).apply();
+                    input.setText("");
+                    refreshCustomSkipWordList(wordList, summary, merged);
+                    Toast.makeText(this, "已保存 " + added + " 条自定义跳过词", Toast.LENGTH_SHORT).show();
+                }));
+        dialog.show();
+    }
+
+    private List<String> loadCustomSkipWords() {
+        String raw = getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getString("custom_skip_words", "");
+        return SkipWordLibrary.parse(raw);
+    }
+
+    private void refreshCustomSkipWordList(LinearLayout list, TextView summary, List<String> words) {
+        list.removeAllViews();
+        summary.setText("已保存 " + words.size() + " / " + SkipWordLibrary.MAX_CUSTOM_WORDS + " 条");
+        if (words.isEmpty()) {
+            TextView empty = label("暂无自定义词条。默认词库仍会正常工作。", 12, 0xFF98A2B3, false);
+            empty.setPadding(0, dp(5), 0, dp(5));
+            list.addView(empty);
+            return;
+        }
+        for (String word : new ArrayList<>(words)) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(8), dp(4), dp(4), dp(4));
+            row.setBackground(roundedDrawable(0xFFF6F8FC, 0xFFE9EDF4, 10));
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+            rowParams.topMargin = dp(5);
+            list.addView(row, rowParams);
+
+            TextView item = label(word, 13, 0xFF344054, true);
+            row.addView(item, new LinearLayout.LayoutParams(0, -2, 1f));
+
+            Button remove = button("删除", 0xFFFCEDEC);
+            remove.setTextColor(0xFFB42318);
+            LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(dp(72), dp(38));
+            row.addView(remove, removeParams);
+            remove.setOnClickListener(v -> {
+                List<String> updated = loadCustomSkipWords();
+                updated.remove(word);
+                getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putString("custom_skip_words", SkipWordLibrary.serialize(updated)).apply();
+                refreshCustomSkipWordList(list, summary, updated);
+                Toast.makeText(this, "已删除词条：" + word, Toast.LENGTH_SHORT).show();
+            });
+        }
+    }
 
     private void showRuleLearningDialog() {
         LinearLayout content = new LinearLayout(this);
