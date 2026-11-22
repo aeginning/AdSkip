@@ -73,12 +73,12 @@ public final class DnsFeedManager {
         ONEHOSTS_LITE(
                 "1hosts-lite",
                 "1Hosts Lite",
-                DnsFeedParser.Format.HOSTS,
-                "偏兼容性的轻量广告、跟踪与恶意域名名单；优先选择 Lite 而非高误拦截的 Xtra",
+                DnsFeedParser.Format.DNSMASQ,
+                "偏兼容性的轻量广告、跟踪与恶意域名名单；使用约 10 万条的 dnsmasq 格式，优先选择 Lite 而非高误拦截的 Xtra",
                 new String[]{
-                        "https://badmojr.github.io/1Hosts/Lite/hosts.txt",
-                        "https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/hosts.txt",
-                        "https://cdn.jsdelivr.net/gh/badmojr/1Hosts@master/Lite/hosts.txt"
+                        "https://badmojr.github.io/1Hosts/Lite/dnsmasq.conf",
+                        "https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/dnsmasq.conf",
+                        "https://cdn.jsdelivr.net/gh/badmojr/1Hosts@master/Lite/dnsmasq.conf"
                 }),
         DAN_POLLOCK_HOSTS(
                 "dan-pollock-hosts",
