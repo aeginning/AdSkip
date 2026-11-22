@@ -297,7 +297,7 @@ public final class DnsFilterVpnService extends VpnService {
             out.write(query);
             out.flush();
             int responseLength = in.readUnsignedShort();
-            if (responseLength < 12 || responseLength > 65535) return null;
+            if (responseLength < 12) return null;
             byte[] response = new byte[responseLength];
             in.readFully(response);
             return response;
