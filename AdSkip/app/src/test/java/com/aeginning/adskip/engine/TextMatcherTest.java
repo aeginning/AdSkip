@@ -153,6 +153,34 @@ public class TextMatcherTest {
         assertFalse(TextMatcher.hasCriticalActionContext("普通视频"));
     }
 
+    @Test public void customSkipWordsRequireAdContextAndStillRespectRiskGates() {
+        java.util.List<String> custom = SkipWordLibrary.parse("稍后略过");
+        AdConfidenceScorer.Assessment accepted = AdConfidenceScorer.assess(
+                "稍后略过", "正在播放广告", true, true, true,
+                96, 36, 1080, 2400, false, 75, custom);
+        assertTrue(accepted.score >= 75);
+        assertTrue(accepted.score < 90);
+        assertEquals(0, AdConfidenceScorer.assess(
+                "稍后略过", "普通视频播放", true, true, true,
+                96, 36, 1080, 2400, false, 75, custom).score);
+        assertEquals(0, AdConfidenceScorer.assess(
+                "稍后略过", "广告页面 · 确认购买", true, true, true,
+                96, 36, 1080, 2400, false, 75, custom).score);
+        assertEquals(0, AdConfidenceScorer.assess(
+                "不可跳过", "广告播放中", true, true, true,
+                96, 36, 1080, 2400, false, 75, custom).score);
+    }
+
+    @Test public void customSkipWordsMustPassFinalGeometryAndSafetyPolicy() {
+        java.util.List<String> custom = SkipWordLibrary.parse("稍后略过");
+        assertTrue(SafetyPolicy.isSafeTarget(new android.graphics.Rect(100, 100, 196, 136),
+                1080, 2400, true, true, true, "稍后略过", "正在播放广告",
+                false, 75, custom));
+        assertFalse(SafetyPolicy.isSafeTarget(new android.graphics.Rect(100, 100, 196, 136),
+                1080, 2400, true, true, true, "稍后略过", "广告 · 支付密码",
+                false, 75, custom));
+    }
+
     @Test public void normalizesFullWidthAndZeroWidthAdLabels() {
         assertTrue(TextMatcher.isCountdown("Ｓｋｉｐ ３"));
         assertTrue(TextMatcher.isCountdown("跳过\u200B 3"));
