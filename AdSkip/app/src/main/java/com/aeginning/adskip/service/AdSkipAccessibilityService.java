@@ -337,12 +337,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 } else if (TextMatcher.isCountdown(context)) {
                     scheduleCountdownRescan(packageName, generation);
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    // The timer may have disappeared from the accessibility tree while
-                    // the button remains visual-only; run OCR once it is no longer counting down.
+                    // The timer may exist only in pixels, not in the accessibility tree.
+                    // Keep the bounded attempt count until OCR confirms the countdown ended.
                     maybeRunOcr(packageName, TextMatcher.hasAdContext(context), true, generation);
-                    countdownRescanAttempts = 0;
                 } else {
                     countdownRescanAttempts = 0;
+                    countdownRescanPackage = null;
                 }
             } finally {
                 if (candidate != null && candidate.ownsNode) recycleNode(candidate.node);
@@ -484,6 +484,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         mainHandler.post(() -> scheduleCountdownRescan(expectedPackage, generation));
                         return;
                     }
+                    // OCR is also the authority for visual-only countdowns. Once its
+                    // second observation no longer contains a timer, stop the poll loop.
+                    mainHandler.post(this::cancelPendingCountdownRescan);
                     OcrCandidate best = null;
                     int bestScore = 0;
                     boolean adContext = TextMatcher.hasAdContext(context);
