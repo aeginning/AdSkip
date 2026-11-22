@@ -551,7 +551,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     boolean allowCountdownClicks = isCountdownClickEnabled();
                     if (TextMatcher.isCountdown(context)) {
                         mainHandler.post(() -> scheduleCountdownRescan(expectedPackage, generation));
-                        if (!allowCountdownClicks) return;
+                        // Continue scanning the frame for a distinct X close affordance.
+                        // The scorer rejects countdown labels unless their toggle is enabled.
                     } else {
                         // OCR confirms that the visual countdown is gone; stop the bounded poll loop.
                         mainHandler.post(this::cancelPendingCountdownRescan);
