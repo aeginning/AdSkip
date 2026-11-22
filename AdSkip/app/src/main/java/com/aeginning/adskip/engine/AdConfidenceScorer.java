@@ -22,13 +22,25 @@ public final class AdConfidenceScorer {
     public static Assessment assess(String label, String screenText, boolean clickable,
                                     boolean enabled, boolean visible, int targetWidth,
                                     int targetHeight, int screenWidth, int screenHeight) {
+        return assess(label, screenText, clickable, enabled, visible, targetWidth,
+                targetHeight, screenWidth, screenHeight, false);
+    }
+
+    public static Assessment assess(String label, String screenText, boolean clickable,
+                                    boolean enabled, boolean visible, int targetWidth,
+                                    int targetHeight, int screenWidth, int screenHeight,
+                                    boolean allowCountdownSkip) {
         String candidate = normalize(label);
         String context = normalize(screenText);
         if (candidate.isEmpty()) return result(0, "空标签");
         if (TextMatcher.isNegativeSkip(candidate)) return result(0, "目标明确表示不可跳过");
         if (TextMatcher.isDangerous(candidate)) return result(0, "目标包含敏感操作词");
-        if (TextMatcher.isCountdown(candidate) || TextMatcher.isCountdown(context)) {
-            return result(0, "页面仍处于广告倒计时");
+        boolean countdownSkipLabel = TextMatcher.isCountdownSkipLabel(candidate);
+        boolean allowedCountdownTarget = allowCountdownSkip && countdownSkipLabel
+                && TextMatcher.hasAdContext(context);
+        if ((TextMatcher.isCountdown(candidate) || TextMatcher.isCountdown(context))
+                && !allowedCountdownTarget) {
+            return result(0, "页面仍处于广告倒计时，倒计时点击未启用或目标不明确");
         }
         if (!clickable || !enabled || !visible) return result(0, "目标不可点击或不可见");
         if (screenWidth <= 0 || screenHeight <= 0 || targetWidth < 24 || targetHeight < 18
@@ -37,7 +49,9 @@ public final class AdConfidenceScorer {
         }
 
         int score;
-        if (TextMatcher.isExplicitSkipAd(candidate)) {
+        if (allowedCountdownTarget) {
+            score = 70;
+        } else if (TextMatcher.isExplicitSkipAd(candidate)) {
             score = 70;
         } else if (TextMatcher.isExplicitCloseAd(candidate)) {
             score = 66;
