@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.content.SharedPreferences;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -51,6 +52,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService screenshotExecutor = Executors.newSingleThreadExecutor();
     private RuleDatabase database;
+    private FloatingStatusOverlay floatingStatusOverlay;
+    private SharedPreferences overlayPreferences;
+    private SharedPreferences.OnSharedPreferenceChangeListener overlayPreferenceListener;
     private TextRecognizer chineseRecognizer;
     private TextRecognizer latinRecognizer;
     private long lastScanAt;
@@ -71,12 +75,23 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         super.onServiceConnected();
         destroyed = false;
         database = new RuleDatabase(this);
+        floatingStatusOverlay = new FloatingStatusOverlay(this);
+        overlayPreferences = getSharedPreferences("adskip_settings", MODE_PRIVATE);
+        overlayPreferenceListener = (preferences, key) -> {
+            if (key != null && (key.startsWith("floating_overlay_") || "dns_active".equals(key))
+                    && floatingStatusOverlay != null) {
+                floatingStatusOverlay.refresh(database, true, true);
+            }
+        };
+        overlayPreferences.registerOnSharedPreferenceChangeListener(overlayPreferenceListener);
         chineseRecognizer = TextRecognition.getClient(new ChineseTextRecognizerOptions.Builder().build());
         latinRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+        floatingStatusOverlay.refresh(database, true, true);
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (destroyed || event == null || database == null) return;
+        refreshFloatingOverlay(false);
         int type = event.getEventType();
         if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
@@ -408,6 +423,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         return result.length() > 120 ? result.substring(0, 120) : result;
     }
 
+    private void refreshFloatingOverlay(boolean force) {
+        if (floatingStatusOverlay != null) floatingStatusOverlay.refresh(database, true, force);
+    }
+
     private void executeNodeCandidate(Candidate candidate, String packageName, String context) {
         long now = SystemClock.elapsedRealtime();
         if (now - lastClickAt < CLICK_COOLDOWN_MS) return;
@@ -429,6 +448,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     (isSecondConfirmationEnabled() ? "二次确认后" : "用户关闭二次确认；单次观察")
                             + "识别通过；灵敏度=" + getSkipButtonSensitivity()
                             + "；最低分=" + minimumScore);
+            refreshFloatingOverlay(true);
         } else {
             database.log(packageName, safeLogLabel(candidate.label), "NO_ACTION", "Control did not accept click");
         }
@@ -648,6 +668,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 database.log(expectedPackage, safeLogLabel(candidate.label), "CLICK",
                         "用户关闭二次确认；单次 OCR 观察；灵敏度="
                                 + getSkipButtonSensitivity() + "；置信度=" + assessment.score);
+                refreshFloatingOverlay(true);
             }
             return;
         }
@@ -778,6 +799,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                 lastClickAt = SystemClock.elapsedRealtime();
                                 database.log(expectedPackage, safeLogLabel(line.getText()), "CLICK",
                                         "OCR 二次截图确认相同文字与位置；置信度=" + second.score);
+                                refreshFloatingOverlay(true);
                             }
                             return;
                         }
@@ -856,6 +878,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         windowGeneration++;
         cancelPendingNodeConfirmation();
         cancelPendingCountdownRescan();
+        refreshFloatingOverlay(true);
     }
 
     @Override public void onDestroy() {
@@ -863,6 +886,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         windowGeneration++;
         cancelPendingNodeConfirmation();
         cancelPendingCountdownRescan();
+        if (overlayPreferences != null && overlayPreferenceListener != null) {
+            overlayPreferences.unregisterOnSharedPreferenceChangeListener(overlayPreferenceListener);
+        }
+        if (floatingStatusOverlay != null) floatingStatusOverlay.remove();
         if (chineseRecognizer != null) chineseRecognizer.close();
         if (latinRecognizer != null) latinRecognizer.close();
         if (database != null) database.close();
