@@ -30,6 +30,14 @@ public final class AdConfidenceScorer {
                                     boolean enabled, boolean visible, int targetWidth,
                                     int targetHeight, int screenWidth, int screenHeight,
                                     boolean allowCountdownSkip) {
+        return assess(label, screenText, clickable, enabled, visible, targetWidth, targetHeight,
+                screenWidth, screenHeight, allowCountdownSkip, 75);
+    }
+
+    public static Assessment assess(String label, String screenText, boolean clickable,
+                                    boolean enabled, boolean visible, int targetWidth,
+                                    int targetHeight, int screenWidth, int screenHeight,
+                                    boolean allowCountdownSkip, int minimumScore) {
         String candidate = normalize(label);
         String context = normalize(screenText);
         if (candidate.isEmpty()) return result(0, "空标签");
@@ -49,7 +57,10 @@ public final class AdConfidenceScorer {
         }
 
         int score;
-        if (allowedCountdownTarget) {
+        if (TextMatcher.isCloseGlyph(candidate)) {
+            if (!TextMatcher.hasAdContext(context)) return result(0, "X 关闭符号缺少广告上下文");
+            score = 70;
+        } else if (allowedCountdownTarget) {
             score = 70;
         } else if (TextMatcher.isExplicitSkipAd(candidate)) {
             score = 70;
@@ -75,14 +86,23 @@ public final class AdConfidenceScorer {
             return result(0, "页面包含高风险操作上下文");
         }
         score = Math.min(100, score);
+        if (score < Math.max(50, Math.min(95, minimumScore))) {
+            return result(score, "低于当前跳过按钮灵敏度门槛");
+        }
         if (score >= 90) return result(score, "高置信度明确跳过按钮");
         if (score >= 75) return result(score, "需要二次识别确认");
         return result(score, "置信度不足，不自动点击");
     }
 
     public static boolean canProceedAfterSecondObservation(Assessment first, Assessment second) {
+        return canProceedAfterSecondObservation(first, second, 75);
+    }
+
+    public static boolean canProceedAfterSecondObservation(Assessment first, Assessment second,
+                                                           int minimumScore) {
+        int threshold = Math.max(50, Math.min(95, minimumScore));
         return first != null && second != null
-                && first.score >= 75 && second.score >= 75
+                && first.score >= threshold && second.score >= threshold
                 && Math.abs(first.score - second.score) <= 15
                 && first.level != Level.REJECTED && second.level != Level.REJECTED;
     }
