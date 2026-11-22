@@ -96,6 +96,8 @@ public final class TextMatcher {
                 || value.matches(".*\\d+\\s*(?:秒|s|sec|second|seconds)\\s*后?(?:可)?\\s*跳过.*")
                 || value.matches(".*\\d+\\s*(?:s|sec|seconds)\\s+(?:to\\s+)?skip.*")
                 || value.matches(".*skip\\s+after\\s+\\d+\\s*(?:s|sec|seconds).*")
+                // Common splash-ad countdown labels: “跳过 3”, “跳过3秒”, “Skip 3”, “Skip 3s”.
+                || value.matches(".*(?:跳过|skip)\\s*\\d+\\s*(?:秒|s|sec|secs|second|seconds)?(?:\\s|$|[,，。.!！?？]).*")
                 || (hasAdContext(value) && value.matches(".*\\d+\\s*(?:s|sec|seconds|秒).*"));
     }
 
