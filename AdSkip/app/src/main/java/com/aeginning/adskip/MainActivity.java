@@ -856,6 +856,7 @@ public final class MainActivity extends Activity {
             int downloadAttempts = 0;
             try {
                 DnsFeedManager.DownloadedFeed downloaded = DnsFeedManager.download(source,
+                        getApplicationContext(),
                         progressText -> mainHandler.post(() -> {
                             if (!activityDestroyed && status.isAttachedToWindow()) {
                                 status.setText(progressText);
