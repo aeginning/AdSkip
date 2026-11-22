@@ -1227,7 +1227,7 @@ public final class MainActivity extends Activity {
         List<String> logs = database.getRecentLogs(100);
         String content = logs.isEmpty()
                 ? "当前还没有运行记录。先开启无障碍服务，在“应用自动化”中勾选要测试的应用，再打开该应用页面。\n\n服务连接、扫描开始、无候选、敏感区域保护、OCR 失败、安全拦截、手势结果和点击后验证都会写入本机诊断日志。"
-                : "当前页面显示最近 100 条；点击“一键复制全部日志”会复制数据库中当前保留的全部日志。\n诊断日志会说明每次未点击的原因；不会保存输入框内容或整屏 OCR 文本。\n\n" + String.join("\n\n", logs);
+                : "当前页面显示最近 100 条；点击“一键复制全部日志”会复制数据库中当前保留的全部日志。\n诊断日志会说明每次未点击的原因；不会保存输入框内容或整屏 OCR 文本。\n点击复制会将日志写入 Android 系统剪贴板；日志可能包含目标应用包名和命中的控件文字，分享前请先检查。\n\n" + String.join("\n\n", logs);
         TextView text = label(content, 12, 0xFF344054, false);
         text.setPadding(dp(14), dp(8), dp(14), dp(8));
         ScrollView scroll = new ScrollView(this);
