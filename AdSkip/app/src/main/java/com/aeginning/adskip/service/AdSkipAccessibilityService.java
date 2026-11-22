@@ -352,7 +352,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     /** Two observations are required. The node is reacquired after the delay; stale nodes are never clicked. */
     private void scheduleNodeConfirmation(Candidate first, String packageName, long generation, String context) {
         if (!isSecondConfirmationEnabled()) {
-            executeNodeCandidate(first, packageName, context);
+            executeNodeCandidate(first, packageName, context, generation);
             return;
         }
         String signature = packageName + "|" + TextMatcher.normalize(first.label);
@@ -438,7 +438,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     return;
                 }
                 logDiagnostic(packageName, "CONFIRM_PASSED", "文字相似度、动态位置容差和二次置信度均通过");
-                executeNodeCandidate(second, packageName, secondContext);
+                executeNodeCandidate(second, packageName, secondContext, generation);
             } catch (Throwable failure) {
                 logDiagnostic(packageName, "CONFIRM_ERROR", "二次确认异常：" + failure.getClass().getSimpleName());
             } finally {
@@ -572,24 +572,43 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private String readLabel(AccessibilityNodeInfo node) {
-        StringBuilder builder = new StringBuilder();
+        // Prefer the node's own label. This keeps glyph-only controls such as "X"
+        // exact instead of concatenating unrelated parent/ad-description text.
         if (!node.isPassword() && !node.isEditable()) {
-            if (node.getText() != null) builder.append(node.getText()).append(' ');
-            if (node.getContentDescription() != null) builder.append(node.getContentDescription()).append(' ');
+            String own = joinLabel(node.getText(), node.getContentDescription());
+            if (!own.isEmpty()) return truncateLabel(own);
         }
+
         AccessibilityNodeInfo parent = node.getParent();
         for (int i = 0; parent != null && i < 2; i++) {
+            String label = "";
             if (parent.isVisibleToUser() && !parent.isPassword() && !parent.isEditable()) {
-                if (parent.getText() != null) builder.append(parent.getText()).append(' ');
-                if (parent.getContentDescription() != null) builder.append(parent.getContentDescription()).append(' ');
+                label = joinLabel(parent.getText(), parent.getContentDescription());
             }
             AccessibilityNodeInfo next = parent.getParent();
             recycleNode(parent);
             parent = next;
+            if (!label.isEmpty()) {
+                if (parent != null) recycleNode(parent);
+                return truncateLabel(label);
+            }
         }
         if (parent != null) recycleNode(parent);
-        String result = builder.toString().trim();
-        return result.length() > 120 ? result.substring(0, 120) : result;
+        return "";
+    }
+
+    private String joinLabel(CharSequence text, CharSequence description) {
+        StringBuilder label = new StringBuilder();
+        if (text != null && text.length() > 0) label.append(text);
+        if (description != null && description.length() > 0) {
+            if (label.length() > 0) label.append(' ');
+            label.append(description);
+        }
+        return label.toString().trim();
+    }
+
+    private String truncateLabel(String label) {
+        return label.length() > 120 ? label.substring(0, 120) : label;
     }
 
     private void refreshFloatingOverlay(boolean force) {
@@ -600,7 +619,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (floatingStatusOverlay != null) floatingStatusOverlay.refresh(database, true, force);
     }
 
-    private void executeNodeCandidate(Candidate candidate, String packageName, String context) {
+    private void executeNodeCandidate(Candidate candidate, String packageName, String context,
+                                       long generation) {
+        if (destroyed || generation != windowGeneration || database == null
+                || !database.isAppEnabled(packageName)
+                || !isActiveWindowSafeForTarget(packageName, generation)) {
+            logDiagnostic(packageName, "CLICK_REVALIDATION_FAILED",
+                    "点击前应用开关、前台窗口或敏感输入保护未通过；候选已作废");
+            return;
+        }
         long now = SystemClock.elapsedRealtime();
         if (now - lastClickAt < CLICK_COOLDOWN_MS) {
             logDiagnostic(packageName, "CLICK_COOLDOWN", "距离上一次点击不足冷却时间；本次候选未执行");
