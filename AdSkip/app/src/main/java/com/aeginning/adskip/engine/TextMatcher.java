@@ -134,7 +134,7 @@ public final class TextMatcher {
     /** True only for a visible skip control whose label contains a changing countdown value. */
     public static boolean isCountdownSkipLabel(String text) {
         String value = normalize(text);
-        return value.matches(".*(?:跳过|skip(?:\\s+(?:in|after))?|スキップ|건너뛰기|omitir|saltar|ignorer|überspringen|пропустить|تخطي)\\s*\\d+.*")
+        return value.matches(".*(?:跳过|skip(?:\\s+(?:in|after))?|スキップ|건너뛰기|omitir|saltar|ignorer|überspringen|пропустить|تخطي)(?:\\s+(?:en|dans|nach|через|بعد))?\\s*\\d+.*")
                 || value.matches(".*skip\\s+(?:in|after)\\s+\\d{1,2}[:：]\\d{2}.*")
                 || value.matches(".*\\bskip\\s+(?:in|after)\\s+\\d+.*")
                 || value.matches(".*\\d+\\s*(?:秒|s|sec|secs|second|seconds)\\s*(?:后|to)?\\s*(?:跳过|skip).*")
@@ -188,14 +188,19 @@ public final class TextMatcher {
     private static String stripDynamicCountdown(String value) {
         if (!isCountdown(value) && !isCountdownSkipLabel(value)) return value;
         String normalized = value.replaceAll("\\d{1,2}\\s*[:：]\\s*\\d{1,2}", " ");
-        // Remove the changing number attached to the skip action, including
-        // labels with no unit ("Skip 4") and abbreviated/full English units.
+        // Normalize changing skip labels across English, Chinese, Japanese, Korean,
+        // Spanish, French, German, Russian and Arabic.
+        String units = "(?:seconds?|secs?|s|segundos?|seg|seconde?s?|sekunden?|sekund(?:e|en)?|"
+                + "секунд(?:а|ы|у)?|ثواني|ثانية|秒|초)";
         normalized = normalized.replaceAll(
-                "(?i)(skip(?:\\s+(?:in|after))?|跳过|スキップ|건너뛰기)\\s*\\d+\\s*(?:seconds?|secs?|s|秒|초)?",
+                "(?i)(skip(?:\\s+(?:in|after))?|跳过|スキップ|건너뛰기"
+                        + "|omitir(?:\\s+en)?|saltar(?:\\s+en)?|ignorer(?:\\s+dans)?"
+                        + "|überspringen(?:\\s+nach)?|пропустить(?:\\s+через)?|تخطي(?:\\s+بعد)?)"
+                        + "\\s*\\d+\\s*" + units + "?",
                 "$1");
-        // Longest English alternatives must come first so "seconds" is not
-        // partially consumed as "sec", which would leave a trailing "onds".
-        normalized = normalized.replaceAll("\\d+\\s*(?:seconds?|secs?|s|秒|초)", " ");
+        // Also remove a number-unit suffix when the language puts the number first
+        // (for example, "3 seconds to skip", "3秒後にスキップ").
+        normalized = normalized.replaceAll("\\d+\\s*" + units, " ");
         return normalized.replaceAll("\\s+", " ").trim();
     }
 
