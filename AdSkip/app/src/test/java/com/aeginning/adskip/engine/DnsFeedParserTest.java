@@ -9,14 +9,15 @@ import static org.junit.Assert.*;
 
 public class DnsFeedParserTest {
     @Test public void parsesDnsmasqDomainScopedRulesAndVersion() throws Exception {
-        String data = "# Version: 2026.11.22\n"
-                + "local=/ads.example.com/\n"
-                + "server=/tracker.example.net/1.1.1.1\n"
-                + "local=/localhost/\n"
-                + "local=/#/\n"
-                + "address=/bad.example.org/0.0.0.0\n";
+        StringBuilder data = new StringBuilder("# Version: 2026.11.22\\n")
+                .append("local=/ads.example.com/\\n")
+                .append("server=/tracker.example.net/1.1.1.1\\n")
+                .append("local=/localhost/\\n")
+                .append("local=/#/\\n")
+                .append("address=/bad.example.org/0.0.0.0\\n");
+        for (int i = 0; i < 1_000; i++) data.append("local=/host").append(i).append(".example.net/\\n");
         DnsFeedParser.ParsedFeed result = DnsFeedParser.parse(
-                new ByteArrayInputStream(repeatToMinimum(data).getBytes(StandardCharsets.UTF_8)),
+                new ByteArrayInputStream(data.toString().getBytes(StandardCharsets.UTF_8)),
                 DnsFeedParser.Format.DNSMASQ);
         assertTrue(result.domains.contains("ads.example.com"));
         assertTrue(result.domains.contains("tracker.example.net"));
@@ -26,12 +27,13 @@ public class DnsFeedParserTest {
     }
 
     @Test public void parsesHostsFormatAndIgnoresAddressesAndLocalAliases() throws Exception {
-        String data = "# Date: 22 Nov 2026\n"
-                + "0.0.0.0 ads.example.com tracker.example.net\n"
-                + "127.0.0.1 localhost\n"
-                + "::1 ip6-localhost\n";
+        StringBuilder data = new StringBuilder("# Date: 22 Nov 2026\\n")
+                .append("0.0.0.0 ads.example.com tracker.example.net\\n")
+                .append("127.0.0.1 localhost\\n")
+                .append("::1 ip6-localhost\\n");
+        for (int i = 0; i < 1_000; i++) data.append("0.0.0.0 host").append(i).append(".example.net\\n");
         DnsFeedParser.ParsedFeed result = DnsFeedParser.parse(
-                new ByteArrayInputStream(repeatToMinimum(data).getBytes(StandardCharsets.UTF_8)),
+                new ByteArrayInputStream(data.toString().getBytes(StandardCharsets.UTF_8)),
                 DnsFeedParser.Format.HOSTS);
         assertTrue(result.domains.contains("ads.example.com"));
         assertTrue(result.domains.contains("tracker.example.net"));
