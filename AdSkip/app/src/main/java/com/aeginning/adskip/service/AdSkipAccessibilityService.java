@@ -1213,7 +1213,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                 AdConfidenceScorer.Assessment glyphAssessment = AdConfidenceScorer.assess(
                                         elementText, context, true, true, true,
                                         elementBox.width(), elementBox.height(), sourceWidth, sourceHeight,
-                                        allowCountdownClicks, getMinimumSkipScore(), getCustomSkipWords());
+                                        allowCountdownClicks, getMinimumSkipScore(), customSkipWords);
                                 if (glyphAssessment.score >= getMinimumSkipScore()
                                         && glyphAssessment.score > bestScore) {
                                     best = new OcrCandidate(new Rect(elementBox),
@@ -1367,7 +1367,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 isCountdownClickEnabled(), minimumScore, customSkipWords);
         if (assessment.score < minimumScore || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                 true, true, true, candidate.label, context,
-                isCountdownClickEnabled(), minimumScore, getCustomSkipWords())) {
+                isCountdownClickEnabled(), minimumScore, customSkipWords)) {
             database.log(expectedPackage, safeLogLabel(candidate.label), "BLOCKED",
                     "OCR 候选未通过置信度门槛或最终安全审核；未执行点击");
             logDiagnostic(expectedPackage, "OCR_BLOCKED",
