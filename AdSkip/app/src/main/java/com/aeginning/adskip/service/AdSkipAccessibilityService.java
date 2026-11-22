@@ -634,18 +634,30 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private String readLabel(AccessibilityNodeInfo node) {
-        // Prefer the node's own label. This keeps glyph-only controls such as "X"
-        // exact instead of concatenating unrelated parent/ad-description text.
+        // Keep single-glyph controls exact. A node may expose "X" as text and
+        // "close button" as description; combining them destroys glyph matching.
         if (!node.isPassword() && !node.isEditable()) {
-            String own = joinLabel(node.getText(), node.getContentDescription());
-            if (!own.isEmpty()) return truncateLabel(own);
+            String text = node.getText() == null ? "" : node.getText().toString().trim();
+            String description = node.getContentDescription() == null
+                    ? "" : node.getContentDescription().toString().trim();
+            if (TextMatcher.isCloseGlyph(text)) return truncateLabel(text);
+            if (TextMatcher.isCloseGlyph(description)) return truncateLabel(description);
+            if (!text.isEmpty()) return truncateLabel(text);
+            if (!description.isEmpty()) return truncateLabel(description);
         }
 
+        // Parent labels are a fallback only when the control itself is unlabeled.
         AccessibilityNodeInfo parent = node.getParent();
         for (int i = 0; parent != null && i < 2; i++) {
             String label = "";
             if (parent.isVisibleToUser() && !parent.isPassword() && !parent.isEditable()) {
-                label = joinLabel(parent.getText(), parent.getContentDescription());
+                String text = parent.getText() == null ? "" : parent.getText().toString().trim();
+                String description = parent.getContentDescription() == null
+                        ? "" : parent.getContentDescription().toString().trim();
+                if (TextMatcher.isCloseGlyph(text)) label = text;
+                else if (TextMatcher.isCloseGlyph(description)) label = description;
+                else if (!text.isEmpty()) label = text;
+                else label = description;
             }
             AccessibilityNodeInfo next = parent.getParent();
             recycleNode(parent);
@@ -657,16 +669,6 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
         if (parent != null) recycleNode(parent);
         return "";
-    }
-
-    private String joinLabel(CharSequence text, CharSequence description) {
-        StringBuilder label = new StringBuilder();
-        if (text != null && text.length() > 0) label.append(text);
-        if (description != null && description.length() > 0) {
-            if (label.length() > 0) label.append(' ');
-            label.append(description);
-        }
-        return label.toString().trim();
     }
 
     private String truncateLabel(String label) {
