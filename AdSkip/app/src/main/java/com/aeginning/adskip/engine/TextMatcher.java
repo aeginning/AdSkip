@@ -10,10 +10,35 @@ public final class TextMatcher {
             "cannot skip", "can't skip", "can not skip", "not skippable",
             "skip unavailable", "skip disabled", "no skip",
             "不要跳过", "不应跳过", "不可跳过", "不能跳过", "无法跳过",
-            "禁止跳过", "无需跳过", "不允许跳过", "不支持跳过"
+            "禁止跳过", "无需跳过", "不允许跳过", "不支持跳过",
+            "暂不可跳过", "尚不可跳过", "当前广告不可跳过", "此广告不可跳过",
+            "不可跳过此广告", "跳过广告不可用", "跳过按钮不可用", "广告暂不可跳过",
+            "skip not available", "skip unavailable", "ad is not skippable",
+            "this ad is not skippable", "ad cannot be skipped", "skip button disabled",
+            "広告をスキップできません", "広告はスキップできません",
+            "광고를 건너뛸 수 없습니다"
     };
     private static final String[] AD_CONTEXT = {
-            "广告", "赞助内容", "推广内容", "广告倒计时", "sponsored", "advertisement", "advertising", "秒后跳过"
+            "广告", "赞助内容", "推广内容", "广告倒计时", "广告播放中",
+            "赞助广告", "推广广告", "商业推广", "sponsored", "sponsored content",
+            "promoted content", "advertisement", "advertising", "ad content", "秒后跳过"
+    };
+
+    private static final String[] EXPLICIT_SKIP_AD = {
+            "跳过广告", "跳过此广告", "跳过当前广告", "跳过视频广告",
+            "跳过当前视频广告", "跳过开屏广告", "跳过片头广告", "广告跳过",
+            "skip ad", "skip ads", "skip this ad", "skip current ad",
+            "skip video ad", "skip this video ad", "skip advertisement",
+            "skip sponsored ad", "skip sponsored content",
+            "広告をスキップ", "광고 건너뛰기"
+    };
+
+    private static final String[] EXPLICIT_CLOSE_AD = {
+            "关闭广告", "关闭此广告", "关闭当前广告", "关闭视频广告",
+            "关闭推广", "关闭赞助内容", "关掉广告",
+            "close ad", "close this ad", "close current ad", "close video ad",
+            "close advertisement", "dismiss ad", "dismiss this ad",
+            "広告を閉じる", "광고 닫기"
     };
     private static final String[] DANGEROUS = {
             "购买", "立即购买", "支付", "付款", "订阅", "开通会员", "立即开通", "下载", "立即下载",
@@ -21,8 +46,28 @@ public final class TextMatcher {
             "继续", "下一步", "打开", "启用", "加入", "免费试用", "立即体验", "开始使用",
             "grant", "allow", "buy", "purchase", "subscribe", "install", "download", "pay",
             "checkout", "confirm", "continue", "accept", "sign in", "log in", "sign up",
-            "start free trial", "try now", "get started", "join now", "claim", "redeem", "activate"
+            "start free trial", "try now", "get started", "join now", "claim", "redeem", "activate",
+            "立即报名", "立即查看", "查看详情", "前往查看", "去看看", "加入购物车",
+            "领取优惠券", "立即领取", "免费领取", "领取奖励", "确认收货", "提交订单",
+            "下单", "去支付", "允许访问", "允许一次", "始终允许", "仅在使用中允许",
+            "購入", "支払い", "インストール", "許可", "登録", "申し込む",
+            "구매", "결제", "설치", "허용", "가입", "구독"
     };
+
+    public static boolean isExplicitSkipAd(String text) {
+        return containsAny(normalize(text), EXPLICIT_SKIP_AD);
+    }
+
+    public static boolean isExplicitCloseAd(String text) {
+        return containsAny(normalize(text), EXPLICIT_CLOSE_AD);
+    }
+
+    private static boolean containsAny(String value, String[] tokens) {
+        for (String token : tokens) {
+            if (value.contains(normalize(token))) return true;
+        }
+        return false;
+    }
 
     public static boolean hasAdContext(String screenText) {
         String text = normalize(screenText);
