@@ -34,7 +34,7 @@ AdSkip does not bundle third-party DNS blocklist snapshots in its APK. Feed file
 - Primary endpoint: https://badmojr.github.io/1Hosts/Lite/hosts.txt
 - Additional HTTPS mirrors: https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/hosts.txt ; https://cdn.jsdelivr.net/gh/badmojr/1Hosts@master/Lite/hosts.txt
 - The Lite variant is the compatibility-oriented list; AdSkip intentionally does not enable the more aggressive Xtra list by default.
-- Review the upstream MPL-2.0 license and current disclaimer before redistribution.
+- Review the upstream license and current disclaimer before redistribution.
 
 ## Dan Pollock Hosts
 
