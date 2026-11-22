@@ -1,5 +1,7 @@
 package com.aeginning.adskip.service;
 
+import com.aeginning.adskip.engine.DnsFeedParser;
+
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
