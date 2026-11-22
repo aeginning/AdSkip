@@ -859,27 +859,29 @@ public final class MainActivity extends Activity {
     }
 
     private void showDnsDisclosure() {
-        if (database.getBlockedDomains().isEmpty()) {
+        if (database.getActiveDomainRuleCount() == 0) {
             new AlertDialog.Builder(this).setTitle("尚未设置 DNS 规则")
-                    .setMessage("当前 DNS 黑名单为空。首次安装或升级时会提供一组可编辑的常见广告域名默认规则；如果你已清空规则，请先在“管理 DNS 域名规则”中添加确认需要拦截的域名。")
+                    .setMessage("当前没有启用的 DNS 规则。你可以添加手工域名，或先下载 HaGeZi / StevenBlack 订阅。DNS 订阅与手工规则分开保存。")
                     .setNegativeButton("取消", null)
-                    .setPositiveButton("管理规则", (dialog, which) -> showDomainRulesDialog())
+                    .setNeutralButton("下载规则库", (dialog, which) -> showDnsFeedDialog())
+                    .setPositiveButton("管理手工规则", (dialog, which) -> showDomainRulesDialog())
                     .show();
             return;
         }
-        if (getSharedPreferences("adskip_settings", MODE_PRIVATE).getBoolean("dns_disclosure_accepted", false)) {
+        if (getSharedPreferences("adskip_settings", MODE_PRIVATE).getBoolean("dns_disclosure_accepted_v2", false)) {
             requestVpnPermission();
             return;
         }
         String message = "DNS 过滤需要 Android 系统 VPN 授权。AdSkip 将 IPv4/IPv6 的本地虚拟 DNS 请求送入本地过滤器，不转发普通网页流量。\n\n"
-                + "命中黑名单的域名会返回 NXDOMAIN；未命中的查询会按顺序尝试 Cloudflare / Google 的 IPv4、IPv6 DNS。上游 UDP 响应被截断时，会尝试使用 DNS-over-TCP 重试。因此这些 DNS 提供商可能看到未被拦截的域名查询。命中黑名单及上游错误的域名会记录在本机日志中，日志仅用于排查过滤结果，可在日志页面清除；不会上传。\n\n"
+                + "命中手工名单或已启用订阅的域名会返回 NXDOMAIN；未命中的查询会轮换尝试 Cloudflare、Google、Quad9 的 IPv4/IPv6 DNS。上游 UDP 响应被截断时，会尝试使用 DNS-over-TCP 重试。因此这些 DNS 提供商可能看到未被拦截的域名查询。命中黑名单及上游错误的域名会记录在本机日志中，重复域名日志会节流；日志仅用于排查过滤结果，可在日志页面清除，不会上传。\n\n"
                 + "注意：当前只处理进入虚拟 DNS 的 UDP 查询；上游 TCP 仅用于截断响应重试，不代理客户端直接发起的 TCP/53 会话，也不拦截 DoH / DoT。启用后会占用 Android 单 VPN 通道，不能与其他 VPN 同时运行。你可以随时点击停止按钮或在系统 VPN 设置中断开。";
         new AlertDialog.Builder(this).setTitle("DNS VPN 数据流向说明")
                 .setMessage(message)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("我已阅读并同意", (dialog, which) -> {
                     getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
-                            .putBoolean("dns_disclosure_accepted", true).apply();
+                            .putBoolean("dns_disclosure_accepted", true)
+                            .putBoolean("dns_disclosure_accepted_v2", true).apply();
                     requestVpnPermission();
                 }).show();
     }
