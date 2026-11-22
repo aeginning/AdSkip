@@ -22,6 +22,13 @@ public class DomainRuleValidatorTest {
         assertEquals("", DomainRuleValidator.normalize("intranet"));
     }
 
+    @Test public void rejectsCommonPublicSuffixesToPreventMassBlocking() {
+        assertEquals("", DomainRuleValidator.normalize("co.uk"));
+        assertEquals("", DomainRuleValidator.normalize("com.cn"));
+        assertEquals("", DomainRuleValidator.normalize("com.sg"));
+        assertEquals("ads.example.co.uk", DomainRuleValidator.normalize("ads.example.co.uk"));
+    }
+
     @Test public void rejectsUrlsPortsAndIpAddresses() {
         assertEquals("", DomainRuleValidator.normalize("https://example.com/ads"));
         assertEquals("", DomainRuleValidator.normalize("example.com:443"));
