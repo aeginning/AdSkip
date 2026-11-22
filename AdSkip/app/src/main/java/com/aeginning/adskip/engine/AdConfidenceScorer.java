@@ -43,6 +43,7 @@ public final class AdConfidenceScorer {
         if (candidate.isEmpty()) return result(0, "空标签");
         if (TextMatcher.isNegativeSkip(candidate)) return result(0, "目标明确表示不可跳过");
         if (TextMatcher.isDangerous(candidate)) return result(0, "目标包含敏感操作词");
+        boolean closeGlyph = TextMatcher.isCloseGlyph(candidate);
         boolean countdownSkipLabel = TextMatcher.isCountdownSkipLabel(candidate);
         boolean adContext = TextMatcher.hasAdContext(context);
         boolean allowedCountdownTarget = allowCountdownSkip && countdownSkipLabel && adContext;
@@ -52,13 +53,17 @@ public final class AdConfidenceScorer {
             return result(0, "页面仍处于广告倒计时，倒计时点击未启用或目标不明确");
         }
         if (!clickable || !enabled || !visible) return result(0, "目标不可点击或不可见");
-        if (screenWidth <= 0 || screenHeight <= 0 || targetWidth < 24 || targetHeight < 18
-                || targetWidth > screenWidth * 0.65f || targetHeight > screenHeight * 0.25f) {
+        int minimumWidth = closeGlyph ? 12 : 24;
+        int minimumHeight = closeGlyph ? 12 : 18;
+        if (screenWidth <= 0 || screenHeight <= 0
+                || targetWidth < minimumWidth || targetHeight < minimumHeight
+                || targetWidth > screenWidth * (closeGlyph ? 0.16f : 0.65f)
+                || targetHeight > screenHeight * (closeGlyph ? 0.10f : 0.25f)) {
             return result(0, "目标尺寸不合理");
         }
 
         int score;
-        if (TextMatcher.isCloseGlyph(candidate)) {
+        if (closeGlyph) {
             if (!TextMatcher.hasAdContext(context)) return result(0, "X 关闭符号缺少广告上下文");
             score = 70;
         } else if (allowedCountdownTarget) {
