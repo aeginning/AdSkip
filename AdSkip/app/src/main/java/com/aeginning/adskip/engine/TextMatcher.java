@@ -127,7 +127,7 @@ public final class TextMatcher {
                 || value.matches(".*\\d+\\s*秒后(?:可)?跳过.*")
                 || value.matches(".*(?:あと\\s*\\d+\\s*秒|\\d+\\s*秒後にスキップ|スキップ\\s*\\d+).*")
                 || value.matches(".*(?:\\d+\\s*초\\s*후\\s*건너뛰기|건너뛰기\\s*\\d+).*")
-                || value.matches(".*(?:omitir|saltar|ignorer|überspringen|пропустить|تخطي)\\s*(?:en|dans|nach|через|after)?\\s*\\d+.*")
+                || value.matches(".*(?:omitir|saltar|ignorer|überspringen|пропустить|تخطي)\\s*(?:en|dans|nach|через|after|بعد)?\\s*\\d+.*")
                 || (hasAdContext(value) && value.matches(".*\\d+\\s*(?:s|sec|seconds|秒|초).*"));
     }
 
