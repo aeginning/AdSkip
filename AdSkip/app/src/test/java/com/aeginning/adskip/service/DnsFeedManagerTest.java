@@ -115,13 +115,17 @@ public class DnsFeedManagerTest {
         for (String mirror : source.mirrorUrls) {
             replies.add(new FakeConnection(new URL(mirror), 503, new byte[0], null, 0));
         }
+        replies.add(new FakeConnection(new URL(source.mirrorUrls.get(0)), 503, new byte[0], null, 0));
+        replies.add(new FakeConnection(new URL(source.mirrorUrls.get(1)), 503, new byte[0], null, 0));
+        List<Long> waits = new ArrayList<>();
 
         try {
-            DnsFeedManager.download(source, url -> replies.removeFirst(), millis -> { }, null);
+            DnsFeedManager.download(source, url -> replies.removeFirst(), waits::add, null);
             fail("Expected DownloadException");
         } catch (DnsFeedManager.DownloadException expected) {
             assertEquals(DnsFeedManager.FailureKind.HTTP, expected.kind);
-            assertEquals(source.mirrorUrls.size(), expected.attempts);
+            assertEquals(source.mirrorUrls.size() + 2, expected.attempts);
+            assertEquals(Arrays.asList(500L, 1_200L), waits);
             assertTrue(expected.toUserMessage().contains("HTTP"));
             assertTrue(expected.toUserMessage().contains("尝试次数"));
         }
