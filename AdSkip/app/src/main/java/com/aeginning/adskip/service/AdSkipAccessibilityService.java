@@ -130,11 +130,33 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
 
         CharSequence packageName = event.getPackageName();
-        if (packageName == null) {
-            logDiagnostic("", "NO_PACKAGE", "系统无障碍事件未提供目标应用包名，无法安全扫描");
-            return;
+        AccessibilityNodeInfo fallbackRoot = null;
+        String pkg = packageName == null ? "" : packageName.toString().trim();
+
+        // Some Android 13/OEM accessibility events (especially content/window
+        // refresh events) omit event.getPackageName(). Recover only from the
+        // currently active accessibility root, never from a stale remembered
+        // package or a broad UsageStats guess.
+        if (pkg.isEmpty()) {
+            try {
+                fallbackRoot = getRootInActiveWindow();
+            } catch (Throwable failure) {
+                logDiagnostic("", "NO_PACKAGE_ROOT_ERROR",
+                        "事件未提供包名，且读取活动窗口失败：" + failure.getClass().getSimpleName());
+                return;
+            }
+            CharSequence rootPackage = fallbackRoot == null ? null : fallbackRoot.getPackageName();
+            pkg = rootPackage == null ? "" : rootPackage.toString().trim();
+            if (pkg.isEmpty() || pkg.equals(getPackageName())) {
+                recycleNode(fallbackRoot);
+                logDiagnostic("", "NO_PACKAGE",
+                        "事件和当前活动窗口均未提供有效目标包名；未使用历史包名猜测目标");
+                return;
+            }
+            logDiagnostic("", "PACKAGE_FROM_ACTIVE_ROOT",
+                    "事件未提供包名，已从当前活动无障碍窗口安全恢复目标；仍需通过应用启用状态和窗口一致性检查");
         }
-        String pkg = packageName.toString();
+
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             CharSequence className = event.getClassName();
             getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
@@ -143,11 +165,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     .putLong("foreground_last_at", System.currentTimeMillis())
                     .apply();
         }
-        if (pkg.equals(getPackageName())) return;
+        if (pkg.equals(getPackageName())) {
+            recycleNode(fallbackRoot);
+            return;
+        }
         if (!database.isAppEnabled(pkg)) {
-            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            recycleNode(fallbackRoot);
+            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                    || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
                 logDiagnostic("", "APP_NOT_ENABLED",
-                        "前台应用尚未在应用自动化中启用；为保护隐私不扫描页面，包名不写入日志");
+                        "当前前台应用尚未在应用自动化中启用；请在应用自动化中勾选并保存后重试。为保护隐私不扫描页面");
             }
             return;
         }
@@ -160,12 +187,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         lastScanAt = now;
         logDiagnostic(pkg, "SCAN", "开始扫描当前窗口的可见控件树");
 
-        AccessibilityNodeInfo root;
-        try {
-            root = getRootInActiveWindow();
-        } catch (Throwable failure) {
-            logDiagnostic(pkg, "NO_WINDOW", "读取活动窗口失败：" + failure.getClass().getSimpleName());
-            return;
+        AccessibilityNodeInfo root = fallbackRoot;
+        if (root == null) {
+            try {
+                root = getRootInActiveWindow();
+            } catch (Throwable failure) {
+                logDiagnostic(pkg, "NO_WINDOW", "读取活动窗口失败：" + failure.getClass().getSimpleName());
+                return;
+            }
         }
         hasSensitiveInputInCurrentWindow = false;
         sensitiveInputBounds.clear();
