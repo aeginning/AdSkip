@@ -1236,7 +1236,6 @@ public final class MainActivity extends Activity {
                 .show();
     }
 
-    @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
     private void addOverlaySizeControl(LinearLayout parent, String title,
                                        String preferenceKey, int min, int max,
                                        int defaultValue, String unit) {
