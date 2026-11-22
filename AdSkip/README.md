@@ -128,7 +128,7 @@
 
 - 新增兼容性报告：Android 版本/API、设备型号、OCR 截图 API 能力、无障碍状态、DNS VPN 状态、Shizuku 状态、Java 堆内存快照、已启用 App 数和本地统计。
 - GitHub Actions 使用 JDK 17 和 Gradle 8.11.1，执行 JUnit、Android Lint、Debug APK 构建，并分别上传 APK 和测试报告。
-- CI Artifact：`AdSkip-1.2.6-debug-apk` 和 `AdSkip-1.2.6-reports`。
+- CI Artifact：`AdSkip-1.3.0-debug-apk` 和 `AdSkip-1.3.0-reports`。
 
 ## 2. 工程结构
 
@@ -151,6 +151,7 @@ AdSkip/
 │   │   │   └── PrivilegeUtils.java
 │   │   └── service/
 │   │       ├── AdSkipAccessibilityService.java
+│   │       ├── DnsFeedManager.java
 │   │       ├── DnsFilterVpnService.java
 │   │       ├── DnsPacketCodec.java
 │   │       └── DnsResponseCache.java
@@ -158,6 +159,8 @@ AdSkip/
 │   └── src/test/java/com/aeginning/adskip/
 │       ├── engine/AdConfidenceScorerTest.java
 │       ├── engine/TextMatcherTest.java
+│       ├── engine/DomainRuleValidatorTest.java
+│       ├── engine/DnsFeedParserTest.java
 │       ├── privilege/PrivilegeUtilsTest.java
 │       ├── service/DnsPacketCodecTest.java
 │       └── service/DnsResponseCacheTest.java
