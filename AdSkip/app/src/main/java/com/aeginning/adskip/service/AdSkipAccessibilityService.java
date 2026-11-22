@@ -181,6 +181,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
         long now = SystemClock.elapsedRealtime();
         if (now - lastScanAt < EVENT_INTERVAL_MS) {
+            recycleNode(fallbackRoot);
             logDiagnostic(pkg, "SCAN_THROTTLED", "短时间收到重复无障碍事件，已合并扫描以降低耗电");
             return;
         }
