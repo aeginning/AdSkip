@@ -468,28 +468,54 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private void runRecognizers(Bitmap bitmap, String expectedPackage, long generation) {
+        runOcrPass(bitmap, expectedPackage, generation, false);
+    }
+
+    /**
+     * Try the recognizer matching the device language first, then the other on-device
+     * model when no safe skip candidate was found. The same downscaled bitmap is reused
+     * sequentially, never processed concurrently, and is recycled exactly once.
+     */
+    private void runOcrPass(Bitmap bitmap, String expectedPackage, long generation, boolean alternate) {
         final int sourceWidth = bitmap.getWidth();
         final int sourceHeight = bitmap.getHeight();
+        boolean chineseLocale = java.util.Locale.getDefault().getLanguage().startsWith("zh");
+        TextRecognizer recognizer = alternate
+                ? (chineseLocale ? latinRecognizer : chineseRecognizer)
+                : (chineseLocale ? chineseRecognizer : latinRecognizer);
+        if (recognizer == null) {
+            if (!bitmap.isRecycled()) bitmap.recycle();
+            ocrInFlight = false;
+            return;
+        }
+
         try {
             InputImage image = InputImage.fromBitmap(bitmap, 0);
-            boolean chineseLocale = java.util.Locale.getDefault().getLanguage().startsWith("zh");
-            TextRecognizer recognizer = chineseLocale ? chineseRecognizer : latinRecognizer;
             Task<Text> task = recognizer.process(image);
             task.addOnCompleteListener(completed -> {
+                boolean handedToFallback = false;
                 try {
-                    if (destroyed || !completed.isSuccessful() || completed.getResult() == null) return;
+                    if (destroyed || !completed.isSuccessful() || completed.getResult() == null) {
+                        if (!alternate && !destroyed) {
+                            handedToFallback = true;
+                            runOcrPass(bitmap, expectedPackage, generation, true);
+                        }
+                        return;
+                    }
+
                     Text result = completed.getResult();
                     String context = result.getText();
                     if (TextMatcher.isCountdown(context)) {
                         mainHandler.post(() -> scheduleCountdownRescan(expectedPackage, generation));
                         return;
                     }
+
                     // OCR is also the authority for visual-only countdowns. Once its
                     // second observation no longer contains a timer, stop the poll loop.
                     mainHandler.post(this::cancelPendingCountdownRescan);
+
                     OcrCandidate best = null;
                     int bestScore = 0;
-                    boolean adContext = TextMatcher.hasAdContext(context);
                     List<String> suppressedLabels = database == null
                             ? java.util.Collections.emptyList() : database.getSuppressedLabels(expectedPackage);
                     for (Text.TextBlock block : result.getTextBlocks()) {
@@ -506,6 +532,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             }
                         }
                     }
+
+                    if (best == null && !alternate && !destroyed) {
+                        // Chinese ads can appear on English-system devices and vice versa.
+                        handedToFallback = true;
+                        runOcrPass(bitmap, expectedPackage, generation, true);
+                        return;
+                    }
+
                     if (best != null) {
                         OcrCandidate selected = best;
                         mainHandler.post(() -> executeOcrCandidate(selected, context, sourceWidth,
@@ -513,11 +547,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     }
                 } catch (Throwable ignored) {
                 } finally {
-                    if (!bitmap.isRecycled()) bitmap.recycle();
-                    ocrInFlight = false;
+                    if (!handedToFallback) {
+                        if (!bitmap.isRecycled()) bitmap.recycle();
+                        ocrInFlight = false;
+                    }
                 }
             });
-        } catch (Throwable t) {
+        } catch (Throwable failure) {
             if (!bitmap.isRecycled()) bitmap.recycle();
             ocrInFlight = false;
         }

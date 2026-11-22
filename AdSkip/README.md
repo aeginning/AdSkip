@@ -1,9 +1,39 @@
 # AdSkip 智能跳广告助手
 
-版本：**1.2.6**（依赖版本同步）
+版本：**1.3.0**（最终候选版）
 包名：`com.aeginning.adskip`
 技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
 最低系统：Android 8.0（API 26）
+
+## 1.3.0 最终版增强
+
+### 广告识别与跳过能力
+- 保留原有无障碍控件树、OCR、本地误判规则、二次观察、坐标安全校验、选定 App 白名单和 Shizuku 只读诊断功能。
+- 文案匹配增加 Unicode NFKC 兼容归一化及零宽字符清理，扩展中、英、日、韩文跳过/关闭广告识别和倒计时格式。
+- 截图 OCR 先按系统语言选择本地模型；未找到合格候选时，再尝试另一套本地语言模型。两个模型顺序复用同一张缩放图像，不并行占用两份截图内存。
+- 对“跳过 3 / Skip 3”倒计时继续等待并触发有界重扫；只有倒计时消失、广告上下文存在、两次文字/位置复核和最终安全策略均通过才允许动作。
+- 危险操作词、密码/可编辑输入控件、无效/越界坐标、不可见/不可点击目标和不完整控件树仍然拒绝自动点击。
+
+### DNS 规则库与订阅
+- 手工域名规则继续独立维护，不会与大型下载订阅混在同一个文本编辑框中。
+- 新增 HaGeZi Multi LIGHT（轻量优先）和 StevenBlack Unified Hosts（覆盖较广）两个用户主动下载/更新的来源。
+- 订阅通过 HTTPS 下载，按 dnsmasq / hosts 格式严格解析；拒绝不支持的规则语法、URL、IP、单标签、本地域名、反向解析区和常见公共后缀。
+- 下载文件限制为 12 MiB，最多 120,000 条唯一域名；少于 1,000 条或格式/域名校验失败时，拒绝导入。
+- 每个订阅独立存储、开关、更新或删除。更新在 SQLite 事务内替换单个订阅；失败回滚，不覆盖手工规则或其他订阅；原订阅的启停状态在更新后保留。
+- DNS 域名查询使用带上限的 LRU 结果缓存和索引查询；订阅元数据计数用于快速展示总量，界面显示为约数以说明跨列表重复域名。
+- 增加常见公共后缀保护（如 co.uk、com.cn、com.sg），避免误把整个地区域名树加入黑名单。
+
+### DNS 执行链与稳定性
+- DNS TUN 读取线程不再等待上游网络响应；请求交给 4 个固定工作线程和 96 个有界队列并发处理，队列满时快速返回 SERVFAIL，避免无限堆积。
+- TUN 响应写入增加同步保护；重复域名拦截/上游错误日志按域名节流，减少 SQLite 高频写入。
+- 上游 DNS 采用轮换起始节点：Cloudflare、Google 和 Quad9 的 IPv4/IPv6 地址；单节点超时更短，并保留 UDP 截断后的 DNS-over-TCP 重试。
+- 关闭 VPN 时停止新任务并关闭 TUN；服务销毁时终止读取与 DNS 工作线程。
+- DNS 仍是 DNS-only VPN：处理被路由到本地接口的 UDP/53，不代理客户端 TCP/53、DoH/DoT 或硬编码 IP；不会宣称能拦截所有应用内广告。Android 同时只能有一个活动 VPN。
+
+### 数据库与兼容性
+- SQLite 从版本 4 增量升级到版本 5，新建独立订阅元数据/规则表和域名索引；旧手工域名、App 选择、误判屏蔽词和历史日志保留。
+- 原有 DNS 手工规则编辑、全选 App 选择器、无障碍权限用途披露、OCR 开关、Shizuku 诊断、近 24 小时统计、日志、兼容性报告、VPN 启动/停止入口均保留。
+- DNS 订阅失败时不修改本机现有规则；删除订阅需单独确认且只删除对应来源。
 
 ## 1.2.6 依赖版本同步
 
@@ -98,7 +128,7 @@
 
 - 新增兼容性报告：Android 版本/API、设备型号、OCR 截图 API 能力、无障碍状态、DNS VPN 状态、Shizuku 状态、Java 堆内存快照、已启用 App 数和本地统计。
 - GitHub Actions 使用 JDK 17 和 Gradle 8.11.1，执行 JUnit、Android Lint、Debug APK 构建，并分别上传 APK 和测试报告。
-- CI Artifact：`AdSkip-1.2.6-debug-apk` 和 `AdSkip-1.2.6-reports`。
+- CI Artifact：`AdSkip-1.3.0-debug-apk` 和 `AdSkip-1.3.0-reports`。
 
 ## 2. 工程结构
 
@@ -112,6 +142,8 @@ AdSkip/
 │   │   ├── db/RuleDatabase.java
 │   │   ├── engine/
 │   │   │   ├── AdConfidenceScorer.java
+│   │   │   │   ├── DnsFeedParser.java
+│   │   │   ├── DomainRuleValidator.java
 │   │   │   ├── SafetyPolicy.java
 │   │   │   └── TextMatcher.java
 │   │   ├── privilege/
@@ -120,6 +152,7 @@ AdSkip/
 │   │   │   └── PrivilegeUtils.java
 │   │   └── service/
 │   │       ├── AdSkipAccessibilityService.java
+│   │       ├── DnsFeedManager.java
 │   │       ├── DnsFilterVpnService.java
 │   │       ├── DnsPacketCodec.java
 │   │       └── DnsResponseCache.java
@@ -127,6 +160,8 @@ AdSkip/
 │   └── src/test/java/com/aeginning/adskip/
 │       ├── engine/AdConfidenceScorerTest.java
 │       ├── engine/TextMatcherTest.java
+│       ├── engine/DomainRuleValidatorTest.java
+│       ├── engine/DnsFeedParserTest.java
 │       ├── privilege/PrivilegeUtilsTest.java
 │       ├── service/DnsPacketCodecTest.java
 │       └── service/DnsResponseCacheTest.java
