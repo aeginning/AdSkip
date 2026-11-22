@@ -498,7 +498,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private void cancelPendingNodeConfirmation() {
-        if (pendingNodeConfirmation != null) mainHandler.removeCallbacks(pendingNodeConfirmation);
+        if (pendingNodeConfirmation != null) {
+            String packageName = "";
+            if (pendingNodeSignature != null) {
+                int separator = pendingNodeSignature.indexOf('|');
+                packageName = separator > 0 ? pendingNodeSignature.substring(0, separator) : "";
+            }
+            logDiagnostic(packageName, "CONFIRM_CANCELLED",
+                    "二次确认任务因窗口切换、服务中断或新候选覆盖而取消；未执行旧候选点击");
+            mainHandler.removeCallbacks(pendingNodeConfirmation);
+        }
         pendingNodeConfirmation = null;
         pendingNodeSignature = null;
     }
@@ -600,7 +609,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private void cancelPendingCountdownRescan() {
-        if (pendingCountdownRescan != null) mainHandler.removeCallbacks(pendingCountdownRescan);
+        if (pendingCountdownRescan != null) {
+            logDiagnostic(countdownRescanPackage, "COUNTDOWN_CANCELLED",
+                    "倒计时主动扫描队列因窗口切换、服务中断或点击请求已派发而取消");
+            mainHandler.removeCallbacks(pendingCountdownRescan);
+        }
         pendingCountdownRescan = null;
         countdownRescanPackage = null;
         countdownRescanAttempts = 0;
@@ -1409,7 +1422,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                 scheduleClickVerification(expectedPackage, observedLabel, mapped, "OCR 二次确认");
                                 refreshFloatingOverlay(true);
                             } else {
-                                database.log(expectedPackage, safeLogLabel(line.getText()), "NO_ACTION",
+                                database.log(expectedPackage, safeLogLabel(observedLabel), "NO_ACTION",
                                         "OCR 二次确认通过，但 Android 未接受坐标手势");
                                 logDiagnostic(expectedPackage, "OCR_GESTURE_REJECTED",
                                         "二次 OCR 通过后 Android 未接受手势派发");
