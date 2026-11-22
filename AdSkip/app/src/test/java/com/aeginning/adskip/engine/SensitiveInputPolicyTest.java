@@ -19,6 +19,12 @@ public class SensitiveInputPolicyTest {
         assertTrue(SensitiveInputPolicy.isSensitive(false, true, 0, null, "短信验证码"));
     }
 
+    @Test public void exactPasswordHintIsSensitiveButSearchContextIsNot() {
+        assertTrue(SensitiveInputPolicy.isSensitive(false, true, 0, "密码", null));
+        assertTrue(SensitiveInputPolicy.isSensitive(false, true, 0, null, "密码"));
+        assertFalse(SensitiveInputPolicy.isSensitive(false, true, 0, "搜索密码教程", null));
+    }
+
     @Test public void descriptiveTextAloneDoesNotMarkAWholePageSensitive() {
         assertFalse(SensitiveInputPolicy.isSensitive(false, false, 0, "密码", "帮助说明"));
         assertFalse(SensitiveInputPolicy.isSensitive(false, true, 0, "搜索密码教程", null));
