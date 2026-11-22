@@ -126,6 +126,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
                 && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return;
 
+        String previousSplashProbePackage = splashProbePackage;
+        int previousSplashProbeAttempts = splashProbeAttempts;
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             windowGeneration++;
@@ -170,6 +172,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             long previousAt = foregroundPrefs.getLong("foreground_last_at", 0L);
             newForegroundApp = SplashProbePolicy.isNewLaunch(
                     previousPackage, pkg, previousAt, System.currentTimeMillis());
+            // Window-list notifications can follow a state-change notification for the
+            // same launch. Preserve its bounded probe budget and rebind to the new
+            // window generation instead of accidentally dropping the startup probe.
+            if (pkg.equals(previousSplashProbePackage)) {
+                newForegroundApp = true;
+                splashProbePackage = pkg;
+                splashProbeAttempts = previousSplashProbeAttempts;
+            }
             if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 CharSequence className = event.getClassName();
                 foregroundPrefs.edit()
