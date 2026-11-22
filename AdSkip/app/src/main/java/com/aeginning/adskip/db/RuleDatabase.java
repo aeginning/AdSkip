@@ -255,7 +255,9 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             metadata.put("enabled", previouslyEnabled);
             metadata.put("rule_count", normalized.size());
             metadata.put("updated_at", System.currentTimeMillis());
-            db.insertWithOnConflict("dns_subscriptions", null, metadata, SQLiteDatabase.CONFLICT_REPLACE);
+            long metadataRow = db.insertWithOnConflict(
+                    "dns_subscriptions", null, metadata, SQLiteDatabase.CONFLICT_REPLACE);
+            if (metadataRow == -1) throw new IllegalStateException("subscription metadata insert failed");
 
             db.delete("dns_subscription_rules", "feed_id=?", new String[]{feedId});
             SQLiteStatement insert = db.compileStatement(
@@ -265,7 +267,9 @@ public final class RuleDatabase extends SQLiteOpenHelper {
                     insert.clearBindings();
                     insert.bindString(1, feedId);
                     insert.bindString(2, domain);
-                    insert.executeInsert();
+                    if (insert.executeInsert() == -1) {
+                        throw new IllegalStateException("subscription rule insert failed");
+                    }
                 }
             } finally {
                 insert.close();
