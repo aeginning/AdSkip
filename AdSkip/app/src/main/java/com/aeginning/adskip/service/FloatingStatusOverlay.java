@@ -95,8 +95,8 @@ final class FloatingStatusOverlay {
         if (!text.equals(lastText)) {
             lastText = text;
             details.setText(text);
-            title.setText(serviceAvailable && enabledApps > 0
-                    ? "AdSkip  ·  自动跳过已启用" : "AdSkip  ·  等待配置");
+            // Keep the header neutral; all dynamic status rows obey their individual toggles.
+            title.setText("AdSkip  ·  状态");
             if (expanded) details.setVisibility(View.VISIBLE);
             panel.requestLayout();
             updatePanelLayout();
@@ -109,7 +109,7 @@ final class FloatingStatusOverlay {
         try {
             windowManager.addView(panel, layoutParams);
             attached = true;
-        } catch (WindowManager.BadTokenException | IllegalStateException | SecurityException failure) {
+        } catch (RuntimeException failure) {
             attached = false;
             panel = null;
             title = null;
@@ -243,7 +243,7 @@ final class FloatingStatusOverlay {
         if (!attached || panel == null) return;
         try {
             windowManager.updateViewLayout(panel, layoutParams);
-        } catch (IllegalArgumentException | IllegalStateException ignored) {
+        } catch (RuntimeException ignored) {
             attached = false;
         }
     }
@@ -252,7 +252,7 @@ final class FloatingStatusOverlay {
         if (attached && panel != null && windowManager != null) {
             try {
                 windowManager.removeView(panel);
-            } catch (IllegalArgumentException | IllegalStateException ignored) { }
+            } catch (RuntimeException ignored) { }
         }
         attached = false;
         panel = null;
