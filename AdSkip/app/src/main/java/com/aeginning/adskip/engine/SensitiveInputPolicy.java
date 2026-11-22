@@ -15,8 +15,8 @@ public final class SensitiveInputPolicy {
             "password", "passcode", "pass phrase", "pin code", "security pin",
             "one time password", "one-time password", "otp", "verification code",
             "security code", "card number", "credit card", "cvv", "cvc",
-            "密码", "口令", "支付密码", "交易密码", "验证码", "短信码",
-            "银行卡号", "信用卡号", "安全码", "动态口令",
+            "口令", "支付密码", "交易密码", "验证码", "短信码",
+            "银行卡号", "信用卡号", "安全码", "动态口令", "输入密码", "请输入密码",
             "パスワード", "暗証番号", "認証コード", "ワンタイムパスワード",
             "비밀번호", "인증번호", "보안 코드", "일회용 비밀번호"
     };
@@ -42,7 +42,7 @@ public final class SensitiveInputPolicy {
 
     private static String normalize(CharSequence value) {
         return value == null ? "" : value.toString().toLowerCase(java.util.Locale.ROOT)
-                .replaceAll("[\\\\u200B-\\\\u200D\\\\u2060\\\\uFEFF]", "")
-                .replaceAll("\\\\s+", " ").trim();
+                .replaceAll("[\\u200B-\\u200D\\u2060\\uFEFF]", "")
+                .replaceAll("\\s+", " ").trim();
     }
 }
