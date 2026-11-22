@@ -1312,11 +1312,26 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                     for (Text.TextBlock block : result.getTextBlocks()) {
                         for (Text.Line line : block.getLines()) {
-                            if (TextMatcher.similarityPercent(expectedLabel, line.getText())
-                                    < getSimilarityThreshold()) continue;
-                            if (isSuppressedLabel(suppressedLabels, line.getText())) continue;
+                            String observedLabel = line.getText();
                             Rect box = line.getBoundingBox();
-                            if (box == null) continue;
+                            if (TextMatcher.isCloseGlyph(expectedLabel)) {
+                                if (!TextMatcher.isCloseGlyph(observedLabel)) {
+                                    observedLabel = null;
+                                    for (Text.Element element : line.getElements()) {
+                                        if (TextMatcher.isCloseGlyph(element.getText())
+                                                && element.getBoundingBox() != null) {
+                                            observedLabel = element.getText();
+                                            box = element.getBoundingBox();
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (observedLabel == null || !TextMatcher.isCloseGlyph(observedLabel)) continue;
+                            } else if (TextMatcher.similarityPercent(expectedLabel, observedLabel)
+                                    < getSimilarityThreshold()) {
+                                continue;
+                            }
+                            if (isSuppressedLabel(suppressedLabels, observedLabel) || box == null) continue;
                             Rect mapped = new Rect(
                                     Math.round(box.left * scaleX), Math.round(box.top * scaleY),
                                     Math.round(box.right * scaleX), Math.round(box.bottom * scaleY));
@@ -1327,7 +1342,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             if (!sameArea) continue;
 
                             AdConfidenceScorer.Assessment second = AdConfidenceScorer.assess(
-                                    line.getText(), context, true, true, true, mapped.width(), mapped.height(),
+                                    observedLabel, context, true, true, true, mapped.width(), mapped.height(),
                                     screenWidth, screenHeight, isCountdownClickEnabled(), getMinimumSkipScore());
                             AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                                     firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
@@ -1336,7 +1351,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                     || !AdConfidenceScorer.canProceedAfterSecondObservation(
                                             first, second, getMinimumSkipScore())
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
-                                            true, true, true, line.getText(), context,
+                                            true, true, true, observedLabel, context,
                                             isCountdownClickEnabled(), getMinimumSkipScore())) {
                                 logDiagnostic(expectedPackage, "OCR_CONFIRM_BLOCKED",
                                         "二次 OCR 文字位置匹配，但置信度或最终安全策略未通过");
@@ -1356,13 +1371,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                             if (dispatchTap(mapped.centerX(), mapped.centerY(), expectedPackage)) {
                                 lastClickAt = SystemClock.elapsedRealtime();
-                                database.log(expectedPackage, safeLogLabel(line.getText()), "CLICK",
+                                database.log(expectedPackage, safeLogLabel(observedLabel), "CLICK",
                                         "多语言 OCR 二次截图确认文字、位置和安全策略；置信度="
                                                 + second.score + "；系统已接受手势请求");
                                 logDiagnostic(expectedPackage, "CLICK_DISPATCHED",
                                         "OCR 二次确认手势已派发，等待点击结果验证");
                                 cancelPendingCountdownRescan();
-                                scheduleClickVerification(expectedPackage, line.getText(), mapped, "OCR 二次确认");
+                                scheduleClickVerification(expectedPackage, observedLabel, mapped, "OCR 二次确认");
                                 refreshFloatingOverlay(true);
                             } else {
                                 database.log(expectedPackage, safeLogLabel(line.getText()), "NO_ACTION",
