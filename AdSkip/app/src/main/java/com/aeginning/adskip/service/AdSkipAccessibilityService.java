@@ -213,17 +213,17 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private boolean isSuppressedLabel(List<String> phrases, String candidate) {
-        String normalized = AdConfidenceScorer.normalize(candidate);
+        String normalized = TextMatcher.normalize(candidate);
         if (normalized.isEmpty()) return false;
         for (String phrase : phrases) {
-            if (phrase != null && normalized.contains(AdConfidenceScorer.normalize(phrase))) return true;
+            if (phrase != null && normalized.contains(TextMatcher.normalize(phrase))) return true;
         }
         return false;
     }
 
     /** Two observations are required. The node is reacquired after the delay; stale nodes are never clicked. */
     private void scheduleNodeConfirmation(Candidate first, String packageName, long generation) {
-        String signature = packageName + "|" + AdConfidenceScorer.normalize(first.label);
+        String signature = packageName + "|" + TextMatcher.normalize(first.label);
         if (signature.equals(pendingNodeSignature)) return;
         cancelPendingNodeConfirmation();
         pendingNodeSignature = signature;
@@ -251,8 +251,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
                 second = chooseCandidate(nodes, text.toString(), packageName);
                 if (second == null) return;
-                boolean sameLabel = AdConfidenceScorer.normalize(initialLabel)
-                        .equals(AdConfidenceScorer.normalize(second.label));
+                boolean sameLabel = TextMatcher.normalize(initialLabel)
+                        .equals(TextMatcher.normalize(second.label));
                 boolean sameArea = Math.abs(initialBounds.centerX() - second.bounds.centerX()) <= 48
                         && Math.abs(initialBounds.centerY() - second.bounds.centerY()) <= 48;
                 AdConfidenceScorer.Assessment firstAssessment = new AdConfidenceScorer.Assessment(
@@ -406,11 +406,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     OcrCandidate best = null;
                     int bestScore = 0;
                     boolean adContext = TextMatcher.hasAdContext(context);
+                    List<String> suppressedLabels = database == null
+                            ? java.util.Collections.emptyList() : database.getSuppressedLabels(expectedPackage);
                     for (Text.TextBlock block : result.getTextBlocks()) {
                         for (Text.Line line : block.getLines()) {
                             String lineText = line.getText();
                             Rect box = line.getBoundingBox();
-                            if (box == null || (database != null && database.isLabelSuppressed(expectedPackage, lineText))) continue;
+                            if (box == null || isSuppressedLabel(suppressedLabels, lineText)) continue;
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                                     lineText, context, true, true, true, box.width(), box.height(),
                                     bitmap.getWidth(), bitmap.getHeight());
@@ -544,6 +546,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                     Text result = completed.getResult();
                     String context = result.getText();
+                    List<String> suppressedLabels = database.getSuppressedLabels(expectedPackage);
                     int screenWidth = getResources().getDisplayMetrics().widthPixels;
                     int screenHeight = getResources().getDisplayMetrics().heightPixels;
                     float scaleX = screenWidth / (float) Math.max(1, bitmap.getWidth());
@@ -552,9 +555,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                     for (Text.TextBlock block : result.getTextBlocks()) {
                         for (Text.Line line : block.getLines()) {
-                            if (!AdConfidenceScorer.normalize(expectedLabel)
-                                    .equals(AdConfidenceScorer.normalize(line.getText()))) continue;
-                            if (database.isLabelSuppressed(expectedPackage, line.getText())) continue;
+                            if (!TextMatcher.normalize(expectedLabel)
+                                    .equals(TextMatcher.normalize(line.getText()))) continue;
+                            if (isSuppressedLabel(suppressedLabels, line.getText())) continue;
                             Rect box = line.getBoundingBox();
                             if (box == null) continue;
                             Rect mapped = new Rect(

@@ -4,47 +4,45 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class TextMatcherTest {
-    @Test public void recognizesChineseSkipLabels() {
-        assertTrue(TextMatcher.score("跳过广告", true) >= 90);
-        assertTrue(TextMatcher.score("跳过", true) >= 80);
-        assertEquals(0, TextMatcher.score("跳过", false));
+    private int confidence(String label, String context) {
+        return AdConfidenceScorer.assess(label, context, true, true, true,
+                96, 36, 1080, 2400).score;
     }
 
-    @Test public void recognizesEnglishSkipLabels() {
-        assertTrue(TextMatcher.score("Skip", true) >= 80);
-        assertEquals(0, TextMatcher.score("Skip", false));
-        assertTrue(TextMatcher.score("Skip Ad", false) >= 90);
+    @Test public void explicitSkipLabelsScoreHighly() {
+        assertTrue(confidence("跳过广告", "正在播放广告") >= 90);
+        assertTrue(confidence("Skip Ad", "Video content") >= 75);
+    }
+
+    @Test public void genericSkipRequiresAdContext() {
+        assertTrue(confidence("跳过", "正在播放广告") >= 75);
+        assertEquals(0, confidence("跳过", "普通视频播放"));
+        assertEquals(0, confidence("Skip", "regular video"));
     }
 
     @Test public void genericCloseRequiresAdContext() {
-        assertEquals(0, TextMatcher.score("关闭", false));
-        assertTrue(TextMatcher.score("关闭", true) > 0);
+        assertEquals(0, confidence("关闭", "普通页面"));
+        assertTrue(confidence("关闭", "广告 sponsored content") >= 75);
+        assertTrue(confidence("关闭广告", "普通页面") >= 75);
     }
 
-    @Test public void rejectsDangerousActions() {
-        assertEquals(0, TextMatcher.score("立即下载", true));
-        assertEquals(0, TextMatcher.score("Allow", true));
-        assertEquals(0, TextMatcher.score("Subscribe", true));
+    @Test public void dangerousActionsAreNeverCandidates() {
+        assertEquals(0, confidence("立即下载", "广告"));
+        assertEquals(0, confidence("Allow", "sponsored content"));
+        assertEquals(0, confidence("Subscribe", "advertisement"));
+        assertEquals(0, confidence("确认购买", "广告"));
     }
 
-    @Test public void doesNotClickBeforeCountdownCompletes() {
-        assertEquals(0, TextMatcher.score("3秒后跳过", true));
-        assertEquals(0, TextMatcher.score("Skip in 5 seconds", true));
-        assertTrue(TextMatcher.score("Skip", true) > 0);
+    @Test public void countdownLabelsAndContextsAreRejected() {
+        assertEquals(0, confidence("跳过", "广告 3秒后跳过"));
+        assertEquals(0, confidence("Skip in 5 seconds", "Advertisement"));
+        assertEquals(0, confidence("跳过", "广告 3 seconds"));
     }
 
-    @Test public void rejectsNegatedSkipLabels() {
-        assertTrue(TextMatcher.isNegativeSkip("Don't skip this ad"));
-        assertTrue(TextMatcher.isNegativeSkip("do not skip"));
-        assertTrue(TextMatcher.isNegativeSkip("不可跳过"));
-        assertTrue(TextMatcher.isNegativeSkip("禁止跳过"));
-        assertEquals(0, TextMatcher.score("Don't skip this ad", true));
-        assertEquals(0, TextMatcher.score("不可跳过", true));
-    }
-
-    @Test public void detectsAdContext() {
-        assertTrue(TextMatcher.hasAdContext("赞助内容 - 广告"));
-        assertTrue(TextMatcher.hasAdContext("Sponsored"));
-        assertFalse(TextMatcher.hasAdContext("设置与账号"));
+    @Test public void negativeSkipLabelsAreRejectedBeforeSubstringMatching() {
+        assertEquals(0, confidence("Don't skip this ad", "advertisement"));
+        assertEquals(0, confidence("不可跳过", "广告"));
+        assertTrue(TextMatcher.isNegativeSkip("Do not skip this advertisement"));
+        assertTrue(TextMatcher.isNegativeSkip("不允许跳过"));
     }
 }

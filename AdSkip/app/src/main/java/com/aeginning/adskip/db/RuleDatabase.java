@@ -23,6 +23,8 @@ public final class RuleDatabase extends SQLiteOpenHelper {
     private static final int DB_VERSION = 3;
     private static final long DOMAIN_CACHE_TTL_MS = 2_000L;
     private static final int MAX_DOMAIN_RULES = 5_000;
+    private static final int MAX_LOG_ENTRIES = 2_000;
+    private static final int LOG_TRIM_INTERVAL = 64;
     private static final Pattern PACKAGE_NAME =
             Pattern.compile("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+");
 
@@ -119,13 +121,6 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             values.put("enabled", 1);
             db.insertWithOnConflict("domain_rules", null, values, SQLiteDatabase.CONFLICT_IGNORE);
         }
-    }
-
-    public synchronized void setAppEnabled(String packageName, boolean enabled) {
-        ContentValues values = new ContentValues();
-        values.put("package_name", packageName);
-        values.put("enabled", enabled ? 1 : 0);
-        getWritableDatabase().insertWithOnConflict("app_rules", null, values, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
     /**
@@ -287,9 +282,12 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         values.put("reason", reason == null ? "" : reason);
         values.put("created_at", System.currentTimeMillis());
         SQLiteDatabase db = getWritableDatabase();
-        db.insert("action_logs", null, values);
-        // Keep the local diagnostic database bounded.
-        db.execSQL("DELETE FROM action_logs WHERE id NOT IN (SELECT id FROM action_logs ORDER BY created_at DESC LIMIT 2000)");
+        long insertedId = db.insert("action_logs", null, values);
+        // Avoid a full table sort and delete on every log write.
+        if (insertedId > 0 && insertedId % LOG_TRIM_INTERVAL == 0) {
+            db.execSQL("DELETE FROM action_logs WHERE id NOT IN (SELECT id FROM action_logs"
+                    + " ORDER BY created_at DESC, id DESC LIMIT " + MAX_LOG_ENTRIES + ")");
+        }
     }
 
 
@@ -379,7 +377,7 @@ public final class RuleDatabase extends SQLiteOpenHelper {
     public synchronized List<String> getRecentLogs(int limit) {
         List<String> result = new ArrayList<>();
         try (Cursor c = getReadableDatabase().rawQuery(
-                "SELECT package_name, matched_text, action, reason, created_at FROM action_logs ORDER BY created_at DESC LIMIT ?",
+                "SELECT package_name, matched_text, action, reason, created_at FROM action_logs ORDER BY created_at DESC, id DESC LIMIT ?",
                 new String[]{String.valueOf(Math.max(1, Math.min(limit, 300)))})) {
             while (c.moveToNext()) {
                 result.add(android.text.format.DateFormat.format("MM-dd HH:mm:ss", c.getLong(4))

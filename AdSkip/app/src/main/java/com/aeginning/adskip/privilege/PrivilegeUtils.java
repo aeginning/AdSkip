@@ -1,7 +1,9 @@
 package com.aeginning.adskip.privilege;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /** Pure helpers shared by the app process and unit tests. */
@@ -37,10 +39,11 @@ public final class PrivilegeUtils {
     public static String sanitizePackageList(String output, int maxPackages) {
         if (output == null || output.isEmpty()) return "未读取到应用列表。";
         List<String> packages = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
         for (String line : output.split("\\r?\\n")) {
             String value = line.trim();
             if (value.startsWith("package:")) value = value.substring("package:".length()).trim();
-            if (isValidPackageName(value) && !packages.contains(value)) {
+            if (isValidPackageName(value) && seen.add(value)) {
                 packages.add(value);
                 if (packages.size() >= Math.max(1, maxPackages)) break;
             }
@@ -59,9 +62,4 @@ public final class PrivilegeUtils {
         return value;
     }
 
-    public static String roleLabel(int uid) {
-        if (uid == 0) return "ROOT";
-        if (uid == 2000) return "ADB/SHELL";
-        return "UNKNOWN";
-    }
 }

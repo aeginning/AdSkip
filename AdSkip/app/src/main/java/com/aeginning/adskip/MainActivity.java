@@ -727,12 +727,10 @@ public final class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode != REQUEST_NOTIFICATIONS) return;
-        if (requestCode == REQUEST_NOTIFICATIONS) {
-            if (grantResults.length == 0 || grantResults[0] != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(this, "通知权限未授予；VPN 前台服务仍会由系统显示运行状态。", Toast.LENGTH_LONG).show();
-            }
-            continueVpnAuthorization();
+        if (grantResults.length == 0 || grantResults[0] != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "通知权限未授予；VPN 前台服务仍会由系统显示运行状态。", Toast.LENGTH_LONG).show();
         }
+        continueVpnAuthorization();
     }
 
     private void startDnsService() {

@@ -1,6 +1,5 @@
 package com.aeginning.adskip.engine;
 
-import java.util.Locale;
 
 /** Pure, deterministic confidence model. It never authorizes risky controls. */
 public final class AdConfidenceScorer {
@@ -86,7 +85,6 @@ public final class AdConfidenceScorer {
     }
 
     public static String normalize(String value) {
-        if (value == null) return "";
-        return value.toLowerCase(Locale.ROOT).replaceAll("[\\s\\u00a0]+", " ").trim();
+        return TextMatcher.normalize(value);
     }
 }

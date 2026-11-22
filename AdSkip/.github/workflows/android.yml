@@ -1,8 +1,12 @@
 name: Android CI
-run-name: AdSkip 1.2.6 · ${{ github.event_name }}
+run-name: AdSkip 1.2.7 · ${{ github.event_name }}
 
 permissions:
   contents: read
+
+concurrency:
+  group: adskip-android-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
@@ -16,50 +20,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
-
-      - name: Set up Gradle 8.9
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.11.1'
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
+        with:
+          packages: platform-tools
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses >/dev/null 2>&1 || true
-
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
-
       - name: Run JVM unit tests
-        run: gradle --no-daemon :app:testDebugUnitTest
-
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
       - name: Run Android lint
-        run: gradle --no-daemon :app:lintDebug
-
+        run: gradle --no-daemon --stacktrace :app:lintDebug
       - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: AdSkip-1.2.6-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
-
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
       - name: Upload test and lint reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AdSkip-1.2.6-reports
+          name: AdSkip-1.2.7-reports
           path: |
             app/build/reports/tests/testDebugUnitTest/**
             app/build/test-results/testDebugUnitTest/**
