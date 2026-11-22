@@ -26,6 +26,7 @@ import com.aeginning.adskip.engine.DiagnosticLogThrottle;
 import com.aeginning.adskip.engine.TargetStability;
 import com.aeginning.adskip.engine.SplashProbePolicy;
 import com.aeginning.adskip.engine.ExtremeSkipPolicy;
+import com.aeginning.adskip.engine.CustomSkipWordPolicy;
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions;
@@ -39,6 +40,8 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Collections;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -59,6 +62,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private FloatingStatusOverlay floatingStatusOverlay;
     private SharedPreferences overlayPreferences;
     private SharedPreferences.OnSharedPreferenceChangeListener overlayPreferenceListener;
+    private volatile Set<String> customSkipWords = Collections.emptySet();
     private TextRecognizer chineseRecognizer;
     private TextRecognizer latinRecognizer;
     private TextRecognizer japaneseRecognizer;
@@ -91,7 +95,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         database = new RuleDatabase(this);
         floatingStatusOverlay = new FloatingStatusOverlay(this);
         overlayPreferences = getSharedPreferences("adskip_settings", MODE_PRIVATE);
+        customSkipWords = CustomSkipWordPolicy.parse(
+                overlayPreferences.getString("custom_skip_words", ""));
         overlayPreferenceListener = (preferences, key) -> {
+            if ("custom_skip_words".equals(key)) {
+                customSkipWords = CustomSkipWordPolicy.parse(
+                        preferences.getString("custom_skip_words", ""));
+            }
             if (key != null && (key.startsWith("floating_overlay_")
                     || "dns_active".equals(key) || "ocr_enabled".equals(key)
                     || "extreme_skip_mode".equals(key))
@@ -385,7 +395,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(label, context,
                         clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
                         bounds.width(), bounds.height(), width, height,
-                        isCountdownClickEnabled(), minimumScore);
+                        isCountdownClickEnabled(), minimumScore, customSkipWords);
                 int score = assessment.score;
                 if (score <= bestScore || score < minimumScore) {
                     lowConfidence++;
@@ -507,7 +517,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 AdConfidenceScorer.Assessment secondAssessment = AdConfidenceScorer.assess(second.label,
                         secondContext, second.node.isClickable(), second.node.isEnabled(),
                         second.node.isVisibleToUser(), second.bounds.width(), second.bounds.height(),
-                        screenWidth, screenHeight, isCountdownClickEnabled(), minimumScore);
+                        screenWidth, screenHeight, isCountdownClickEnabled(), minimumScore, customSkipWords);
                 if (!sameLabel || !sameArea
                         || !AdConfidenceScorer.canProceedAfterSecondObservation(
                                 firstAssessment, secondAssessment, minimumScore)) {
@@ -1191,7 +1201,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                                     lineText, context, true, true, true, box.width(), box.height(),
                                     sourceWidth, sourceHeight,
-                                    allowCountdownClicks, getMinimumSkipScore());
+                                    allowCountdownClicks, getMinimumSkipScore(), customSkipWords);
                             if (assessment.score >= getMinimumSkipScore() && assessment.score > bestScore) {
                                 best = new OcrCandidate(new Rect(box), lineText, assessment.score);
                                 bestScore = assessment.score;
@@ -1208,7 +1218,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                 AdConfidenceScorer.Assessment glyphAssessment = AdConfidenceScorer.assess(
                                         elementText, context, true, true, true,
                                         elementBox.width(), elementBox.height(), sourceWidth, sourceHeight,
-                                        allowCountdownClicks, getMinimumSkipScore());
+                                        allowCountdownClicks, getMinimumSkipScore(), customSkipWords);
                                 if (glyphAssessment.score >= getMinimumSkipScore()
                                         && glyphAssessment.score > bestScore) {
                                     best = new OcrCandidate(new Rect(elementBox),
@@ -1352,7 +1362,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 Math.round(candidate.bounds.bottom * scaleY));
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(candidate.label, context,
                 true, true, true, mapped.width(), mapped.height(), screenWidth, screenHeight,
-                isCountdownClickEnabled(), minimumScore);
+                isCountdownClickEnabled(), minimumScore, customSkipWords);
         if (assessment.score < minimumScore || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                 true, true, true, candidate.label, context,
                 isCountdownClickEnabled(), minimumScore)) {
@@ -1581,7 +1591,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                             AdConfidenceScorer.Assessment second = AdConfidenceScorer.assess(
                                     observedLabel, context, true, true, true, mapped.width(), mapped.height(),
-                                    screenWidth, screenHeight, isCountdownClickEnabled(), getMinimumSkipScore());
+                                    screenWidth, screenHeight, isCountdownClickEnabled(), getMinimumSkipScore(), customSkipWords);
                             AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                                     firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
                                             : AdConfidenceScorer.Level.REVIEW, "首次 OCR 观察");
