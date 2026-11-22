@@ -1243,19 +1243,20 @@ public final class MainActivity extends Activity {
         int saved = getSharedPreferences("adskip_settings", MODE_PRIVATE)
                 .getInt(preferenceKey, defaultValue);
         int initial = Math.max(min, Math.min(max, saved));
-        valueLabel.setText(title + "：" + initial + " " + unit);
+        valueLabel.setText(getString(R.string.floating_overlay_size_value, title, initial, unit));
         addGap(parent, 5);
         parent.addView(valueLabel);
 
         SeekBar control = new SeekBar(this);
         control.setMax(max - min);
         control.setProgress(initial - min);
-        control.setContentDescription(title + "，" + min + " 到 " + max + " " + unit);
+        control.setContentDescription(getString(R.string.floating_overlay_size_description,
+                title, min, max, unit));
         parent.addView(control, new LinearLayout.LayoutParams(-1, dp(38)));
         control.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 int value = min + progress;
-                valueLabel.setText(title + "：" + value + " " + unit);
+                valueLabel.setText(getString(R.string.floating_overlay_size_value, title, value, unit));
                 if (fromUser) getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
                         .putInt(preferenceKey, value).apply();
             }
@@ -1264,6 +1265,7 @@ public final class MainActivity extends Activity {
         });
     }
 
+    @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
     private android.widget.Switch addOverlayPreferenceSwitch(
             LinearLayout parent, String labelText, String preferenceKey, boolean defaultValue) {
         android.widget.Switch option = new android.widget.Switch(this);
