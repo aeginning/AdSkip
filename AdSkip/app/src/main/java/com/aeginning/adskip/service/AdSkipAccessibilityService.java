@@ -42,6 +42,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private static final long OCR_AD_INTERVAL_MS = 850L;
     private static final long OCR_VISUAL_PROBE_INTERVAL_MS = 7_000L;
     private static final long CLICK_CONFIRM_DELAY_MS = 260L;
+    private static final long COUNTDOWN_RESCAN_INTERVAL_MS = 900L;
+    private static final int MAX_COUNTDOWN_RESCANS = 15;
     private static final int OCR_MAX_DIMENSION = 1280;
     private static final int MAX_NODES = 650;
     private static final int MAX_DEPTH = 14;
@@ -61,6 +63,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private boolean nodeScanIncomplete;
     private String pendingNodeSignature;
     private Runnable pendingNodeConfirmation;
+    private Runnable pendingCountdownRescan;
+    private String countdownRescanPackage;
+    private int countdownRescanAttempts;
 
     @Override public void onServiceConnected() {
         super.onServiceConnected();
@@ -75,12 +80,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         int type = event.getEventType();
         if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
                 && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return;
 
         // Invalidate delayed actions even if Android emits a window event without a package name.
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             windowGeneration++;
             cancelPendingNodeConfirmation();
+            cancelPendingCountdownRescan();
         }
         CharSequence packageName = event.getPackageName();
         if (packageName == null) return;
@@ -118,6 +125,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             collectNodes(root, 0, nodes, screenText);
             if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
             context = screenText.toString();
+            if (TextMatcher.isCountdown(context)) {
+                scheduleCountdownRescan(pkg, windowGeneration);
+            }
             candidate = chooseCandidate(nodes, context, pkg);
             if (candidate != null) {
                 scheduleNodeConfirmation(candidate, pkg, windowGeneration);
@@ -282,6 +292,73 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         pendingNodeSignature = null;
     }
 
+    /**
+     * Re-scan a selected app after a visible ad countdown. Some splash ads expose
+     * “跳过 3” only through OCR or update the label without a window-content event.
+     * Polling is bounded and always revalidates the foreground package and window.
+     */
+    private void scheduleCountdownRescan(String packageName, long generation) {
+        if (destroyed || database == null || packageName == null
+                || generation != windowGeneration || !database.isAppEnabled(packageName)) return;
+        if (!packageName.equals(countdownRescanPackage)) {
+            cancelPendingCountdownRescan();
+            countdownRescanPackage = packageName;
+            countdownRescanAttempts = 0;
+        }
+        if (pendingCountdownRescan != null || countdownRescanAttempts >= MAX_COUNTDOWN_RESCANS) return;
+        countdownRescanAttempts++;
+        pendingCountdownRescan = () -> {
+            pendingCountdownRescan = null;
+            if (destroyed || database == null || generation != windowGeneration
+                    || !database.isAppEnabled(packageName)) return;
+
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return;
+            CharSequence rootPackage = root.getPackageName();
+            if (rootPackage == null || !packageName.contentEquals(rootPackage)) {
+                recycleNode(root);
+                return;
+            }
+
+            hasSensitiveInputInCurrentWindow = false;
+            nodeScanIncomplete = false;
+            List<AccessibilityNodeInfo> nodes = new ArrayList<>();
+            Candidate candidate = null;
+            try {
+                StringBuilder screenText = new StringBuilder();
+                collectNodes(root, 0, nodes, screenText);
+                if (nodeScanIncomplete || hasSensitiveInputInCurrentWindow) return;
+
+                String context = screenText.toString();
+                candidate = chooseCandidate(nodes, context, packageName);
+                if (candidate != null) {
+                    scheduleNodeConfirmation(candidate, packageName, generation);
+                    countdownRescanAttempts = 0;
+                } else if (TextMatcher.isCountdown(context)) {
+                    scheduleCountdownRescan(packageName, generation);
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    // The timer may have disappeared from the accessibility tree while
+                    // the button remains visual-only; run OCR once it is no longer counting down.
+                    maybeRunOcr(packageName, TextMatcher.hasAdContext(context), true, generation);
+                    countdownRescanAttempts = 0;
+                } else {
+                    countdownRescanAttempts = 0;
+                }
+            } finally {
+                if (candidate != null && candidate.ownsNode) recycleNode(candidate.node);
+                recycleNodes(nodes);
+            }
+        };
+        mainHandler.postDelayed(pendingCountdownRescan, COUNTDOWN_RESCAN_INTERVAL_MS);
+    }
+
+    private void cancelPendingCountdownRescan() {
+        if (pendingCountdownRescan != null) mainHandler.removeCallbacks(pendingCountdownRescan);
+        pendingCountdownRescan = null;
+        countdownRescanPackage = null;
+        countdownRescanAttempts = 0;
+    }
+
     private ClickableTarget nearestClickable(AccessibilityNodeInfo node) {
         AccessibilityNodeInfo current = node;
         boolean owned = false;
@@ -403,6 +480,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     if (destroyed || !completed.isSuccessful() || completed.getResult() == null) return;
                     Text result = completed.getResult();
                     String context = result.getText();
+                    if (TextMatcher.isCountdown(context)) {
+                        mainHandler.post(() -> scheduleCountdownRescan(expectedPackage, generation));
+                        return;
+                    }
                     OcrCandidate best = null;
                     int bestScore = 0;
                     boolean adContext = TextMatcher.hasAdContext(context);
@@ -416,7 +497,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                                     lineText, context, true, true, true, box.width(), box.height(),
                                     bitmap.getWidth(), bitmap.getHeight());
-                            if (assessment.score >= 85 && assessment.score > bestScore) {
+                            if (assessment.score >= 75 && assessment.score > bestScore) {
                                 best = new OcrCandidate(new Rect(box), lineText, assessment.score);
                                 bestScore = assessment.score;
                             }
@@ -457,7 +538,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 Math.round(candidate.bounds.bottom * scaleY));
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(candidate.label, context,
                 true, true, true, mapped.width(), mapped.height(), screenWidth, screenHeight);
-        if (assessment.score < 85 || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
+        if (assessment.score < 75 || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                 true, true, true, candidate.label, context)) {
             database.log(expectedPackage, safeLogLabel(candidate.label), "BLOCKED", "OCR 置信度或安全审核未通过");
             return;
@@ -573,7 +654,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                                     firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
                                             : AdConfidenceScorer.Level.REVIEW, "首次 OCR 观察");
-                            if (second.score < 85
+                            if (second.score < 75
                                     || !AdConfidenceScorer.canProceedAfterSecondObservation(first, second)
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                                             true, true, true, line.getText(), context)) continue;
@@ -664,12 +745,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         // An interrupted service must never complete a previously queued OCR/node click.
         windowGeneration++;
         cancelPendingNodeConfirmation();
+        cancelPendingCountdownRescan();
     }
 
     @Override public void onDestroy() {
         destroyed = true;
         windowGeneration++;
         cancelPendingNodeConfirmation();
+        cancelPendingCountdownRescan();
         if (chineseRecognizer != null) chineseRecognizer.close();
         if (latinRecognizer != null) latinRecognizer.close();
         if (database != null) database.close();
