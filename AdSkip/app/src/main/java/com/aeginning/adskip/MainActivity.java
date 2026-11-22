@@ -852,10 +852,19 @@ public final class MainActivity extends Activity {
             int parsedCount = 0;
             String feedVersion = "";
             String failure = null;
+            String downloadedFrom = "";
+            int downloadAttempts = 0;
             try {
-                DnsFeedManager.DownloadedFeed downloaded = DnsFeedManager.download(source);
+                DnsFeedManager.DownloadedFeed downloaded = DnsFeedManager.download(source,
+                        progressText -> mainHandler.post(() -> {
+                            if (!activityDestroyed && status.isAttachedToWindow()) {
+                                status.setText(progressText);
+                            }
+                        }));
                 parsedCount = downloaded.parsed.domains.size();
                 feedVersion = downloaded.parsed.version;
+                downloadedFrom = downloaded.downloadedFrom;
+                downloadAttempts = downloaded.attempts;
                 RuleDatabase workerDb = new RuleDatabase(getApplicationContext());
                 try {
                     importResult = workerDb.replaceDnsFeed(
@@ -865,27 +874,34 @@ public final class MainActivity extends Activity {
                 }
                 if (!importResult.success) failure = importResult.error;
             } catch (Exception error) {
-                failure = error.getClass().getSimpleName() + ": " + error.getMessage();
+                failure = error instanceof DnsFeedManager.DownloadException
+                        ? ((DnsFeedManager.DownloadException) error).toUserMessage()
+                        : error.getClass().getSimpleName() + ": " + error.getMessage();
             }
 
             final int count = parsedCount;
             final String version = feedVersion;
             final String errorText = failure;
+            final String sourceUrl = downloadedFrom;
+            final int attempts = downloadAttempts;
             mainHandler.post(() -> {
                 if (activityDestroyed || isFinishing()) return;
                 if (progressDialog.isShowing()) progressDialog.dismiss();
                 if (errorText != null) {
                     new AlertDialog.Builder(this)
-                            .setTitle("DNS 订阅未更新")
+                            .setTitle("DNS 订阅暂时无法更新")
                             .setMessage(errorText + "\n\n原订阅和手工域名规则均未修改。")
-                            .setPositiveButton("知道了", null)
+                            .setNegativeButton("关闭", null)
+                            .setPositiveButton("重试更新", (d, w) ->
+                                    downloadAndInstallDnsFeed(source))
                             .show();
                     return;
                 }
                 refreshStatus();
                 String message = "已导入 " + count + " 条有效域名"
                         + (version.isEmpty() ? "" : "（版本 " + version + "）")
-                        + "。原有手工规则和其他订阅均已保留。";
+                        + "。本次使用 " + (sourceUrl.isEmpty() ? "备用线路" : Uri.parse(sourceUrl).getHost())
+                        + "，请求 " + attempts + " 次。原有手工规则和其他订阅均已保留。";
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show();
                 showDnsFeedManagementDialog();
             });
