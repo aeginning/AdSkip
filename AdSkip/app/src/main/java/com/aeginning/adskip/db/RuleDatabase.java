@@ -20,7 +20,7 @@ import com.aeginning.adskip.engine.DomainRuleValidator;
 /** Local-only rule database. No screen text or network traffic is uploaded. */
 public final class RuleDatabase extends SQLiteOpenHelper {
     private static final String DB_NAME = "adskip_rules.db";
-    private static final int DB_VERSION = 3;
+    private static final int DB_VERSION = 4;
     private static final long DOMAIN_CACHE_TTL_MS = 2_000L;
     private static final int MAX_DOMAIN_RULES = 5_000;
     private static final int MAX_LOG_ENTRIES = 2_000;
@@ -85,7 +85,31 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             "tapjoy.com",
             "adcolony.com",
             "inmobi.com",
-            "adjust.com"
+            "adjust.com",
+
+            // Selected OEM and mobile-ad endpoints from maintained mobile ad filters.
+            // Exact hosts only; avoid broad vendor root domains that carry normal services.
+            "api.ad.xiaomi.com",
+            "adv.sec.miui.com",
+            "adv.sec.intl.miui.com",
+            "adx-open-service.youku.com",
+            "ad.youku.com",
+            "ykad-data.youku.com",
+            "cad.youku.com",
+            "sspapi-prd.samsungrs.com",
+            "admin.appnext.com",
+            "global.appnext.com",
+            "cdn.appnext.com",
+            "api.appnxt.net",
+            "apis.appnxt.net",
+            "banners-slb.mobile.yandex.net",
+            "banners.mobile.yandex.net",
+            "pangle.io",
+            "dm.toutiao.com",
+            "tradplusad.com",
+            "ad.tencentmusic.com",
+            "appodeal.com",
+            "appbaqend.com"
     };
 
     private Set<String> blockedDomainCache;
@@ -109,7 +133,11 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_suppressed_labels_package ON suppressed_labels(package_name)");
         }
         if (oldVersion < 3) {
-            // Append missing defaults without deleting or replacing user-defined rules.
+            db.execSQL("CREATE TABLE IF NOT EXISTS suppressed_labels (package_name TEXT NOT NULL, phrase TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(package_name, phrase))");
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_suppressed_labels_package ON suppressed_labels(package_name)");
+        }
+        if (oldVersion < 4) {
+            // Append newly curated defaults without deleting or replacing user-defined rules.
             insertDefaultDomainRules(db);
         }
     }
