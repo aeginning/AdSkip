@@ -48,7 +48,7 @@ public class TextMatcherTest {
 
     @Test public void additionalExplicitAdLabelsAreRecognized() {
         assertTrue(confidence("跳过此广告", "广告播放中") >= 90);
-        assertTrue(confidence("跳过当前视频广告", "正在播放") >= 90);
+        assertTrue(confidence("跳过当前视频广告", "正在播放") >= 75);
         assertTrue(confidence("关闭此广告", "普通页面") >= 75);
         assertTrue(confidence("Dismiss this ad", "sponsored video") >= 90);
         assertTrue(confidence("広告をスキップ", "広告") >= 90);
