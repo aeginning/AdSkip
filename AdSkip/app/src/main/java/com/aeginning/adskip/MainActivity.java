@@ -1055,7 +1055,7 @@ public final class MainActivity extends Activity {
             return;
         }
         String message = "AdSkip 需要无障碍权限，以便在你明确选择的 App 中读取当前界面的可见控件文字、描述和位置，寻找明确的跳过广告按钮。Android 11 及以上还可对当前屏幕截图并使用本地 OCR 识别按钮。\n\n"
-                + "识别内容只在本机内存中处理，不上传服务器；本地 SQLite 仅保存你选择的 App 规则、匹配到的按钮标签和操作日志。不会提取可编辑输入控件文本；检测到密码或其他可编辑输入控件时会停用 OCR 截图识别。不录制音频，也不会尝试点击购买、支付、下载、安装、授权、订阅、登录或同意按钮。无法确定时不会点击。\n\n"
+                + "识别内容只在本机内存中处理，不上传服务器；本地 SQLite 仅保存你选择的 App 规则、匹配到的按钮标签和操作日志。不会读取或保存输入框中的输入值；普通搜索框不会中止页面识别。密码、支付密码、银行卡信息或验证码等敏感区域会被标记避让，区域及邻近范围内不会执行节点点击；为避免截图读取输入内容，检测到敏感区域时会暂停整屏 OCR。不录制音频，也不会尝试点击购买、支付、下载、安装、授权、订阅、登录或同意按钮。无法确定时不会点击。\n\n"
                 + "启用后仍可随时在 Android 无障碍设置中关闭服务。请只为你信任的 App 启用规则。";
         new AlertDialog.Builder(this).setTitle("无障碍权限用途与数据说明")
                 .setMessage(message)
@@ -1223,13 +1223,14 @@ public final class MainActivity extends Activity {
 
     private void showLogs() {
         List<String> logs = database.getRecentLogs(100);
-        String content = logs.isEmpty() ? "暂无日志。启用无障碍服务并选择测试应用后，识别与安全拦截记录会显示在这里。"
-                : String.join("\n\n", logs);
+        String content = logs.isEmpty()
+                ? "当前还没有运行记录。先开启无障碍服务，在“应用自动化”中勾选要测试的应用，再打开该应用页面。\n\n服务连接、扫描开始、无候选、敏感区域保护、OCR 失败、安全拦截、手势结果和点击后验证都会写入本机诊断日志。"
+                : "诊断日志会说明每次未点击的原因；不会保存输入框内容或整屏 OCR 文本。\n\n" + String.join("\n\n", logs);
         TextView text = label(content, 12, 0xFF344054, false);
         text.setPadding(dp(14), dp(8), dp(14), dp(8));
         ScrollView scroll = new ScrollView(this);
         scroll.addView(text);
-        new AlertDialog.Builder(this).setTitle("最近 100 条日志")
+        new AlertDialog.Builder(this).setTitle("识别诊断与过滤日志 · 最近 100 条")
                 .setView(scroll)
                 .setNegativeButton("关闭", null)
                 .setNeutralButton("清空日志", (dialog, which) -> database.clearLogs())

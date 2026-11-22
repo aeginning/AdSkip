@@ -112,6 +112,31 @@ public class TextMatcherTest {
         assertFalse(TextMatcher.isCloseGlyph("关闭"));
     }
 
+    @Test public void closeGlyphCompatibilityIncludesMoreUnicodeVariants() {
+        assertTrue(TextMatcher.isCloseGlyph("╳"));
+        assertTrue(TextMatcher.isCloseGlyph("⨯"));
+        assertTrue(TextMatcher.isCloseGlyph("☓"));
+        assertTrue(TextMatcher.isCloseGlyph("❎"));
+        assertTrue(TextMatcher.isCloseGlyph("✖️"));
+        assertFalse(TextMatcher.isCloseGlyph("X install"));
+    }
+
+    @Test public void dynamicCountdownAndOcrSpacingAreTolerated() {
+        assertTrue(TextMatcher.isCountdown("Skip in 00:05"));
+        assertTrue(TextMatcher.isCountdown("omitir en 5 segundos"));
+        assertTrue(TextMatcher.isCountdown("スキップ 3"));
+        assertTrue(TextMatcher.isCountdown("건너뛰기 3"));
+        assertTrue(TextMatcher.isCountdownSkipLabel("omitir en 5 segundos"));
+        assertTrue(TextMatcher.isCountdown("تخطي بعد 3 ثواني"));
+        assertEquals(100, TextMatcher.similarityPercent("Skip in 5 seconds", "Skip in 2 sec"));
+        assertEquals(100, TextMatcher.similarityPercent("omitir en 5 segundos", "omitir en 2 segundos"));
+        assertEquals(100, TextMatcher.similarityPercent("ignorer dans 5 secondes", "ignorer dans 2 secondes"));
+        assertEquals(100, TextMatcher.similarityPercent("пропустить через 5 секунд", "пропустить через 2 секунды"));
+        assertEquals(100, TextMatcher.similarityPercent("تخطي بعد 3 ثواني", "تخطي بعد 1 ثانية"));
+        assertEquals(100, TextMatcher.similarityPercent("跳过 3 秒", "跳过"));
+        assertTrue(TextMatcher.similarityPercent("Skip Ad", "Skip  Ad") >= 95);
+    }
+
     @Test public void sensitivityMappingIsMonotonic() {
         assertEquals(90, AdConfidenceScorer.minimumScoreForSensitivity(0));
         assertEquals(75, AdConfidenceScorer.minimumScoreForSensitivity(50));

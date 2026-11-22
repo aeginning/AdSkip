@@ -77,6 +77,12 @@ public class AdConfidenceScorerTest {
         assertTrue(result.score >= 90);
     }
 
+    @Test public void largerCloseGlyphStillFitsTheExpandedBounds() {
+        AdConfidenceScorer.Assessment result = AdConfidenceScorer.assess(
+                "×", "Sponsored advertisement", true, true, true, 210, 300, 1080, 2400);
+        assertTrue(result.score >= 90);
+    }
+
     @Test public void XGlyphCanBeDetectedWhenCountdownTextAppearsElsewhere() {
         AdConfidenceScorer.Assessment result = AdConfidenceScorer.assess(
                 "×", "广告来源：趣盟 · 跳过 4", true, true, true, 40, 36, 1080, 2400,

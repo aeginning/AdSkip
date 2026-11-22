@@ -32,8 +32,8 @@ public final class SafetyPolicy {
         int minWidth = closeGlyphCandidate ? 12 : 24;
         int minHeight = closeGlyphCandidate ? 12 : 18;
         if (bounds.width() < minWidth || bounds.height() < minHeight
-                || bounds.width() > screenWidth * (closeGlyphCandidate ? 0.16f : 0.65f)
-                || bounds.height() > screenHeight * (closeGlyphCandidate ? 0.10f : 0.25f)) return false;
+                || bounds.width() > screenWidth * (closeGlyphCandidate ? 0.22f : 0.65f)
+                || bounds.height() > screenHeight * (closeGlyphCandidate ? 0.16f : 0.25f)) return false;
         // Keep coordinate actions away from system gesture regions. An explicitly
         // enabled, OCR-confirmed skip countdown may live in the top-right splash-ad slot.
         boolean adContext = TextMatcher.hasAdContext(surroundingText);
@@ -43,14 +43,18 @@ public final class SafetyPolicy {
                 && bounds.left >= screenWidth * 0.60f
                 && bounds.top >= screenHeight * 0.01f
                 && bounds.bottom <= screenHeight * 0.12f;
+        // Allow common OEM/ad-SDK close-button layouts beyond the very narrow
+        // top-right corner, while retaining a strict ad-context and upper-right gate.
         boolean topRightCloseGlyph = TextMatcher.isCloseGlyph(candidateText)
                 && adContext
-                && bounds.left >= screenWidth * 0.70f
-                && bounds.centerX() >= screenWidth * 0.82f
-                && bounds.top >= screenHeight * 0.01f
-                && bounds.bottom <= screenHeight * 0.22f
-                && bounds.width() <= screenWidth * 0.16f
-                && bounds.height() <= screenHeight * 0.10f;
+                && bounds.left >= screenWidth * 0.55f
+                && bounds.centerX() >= screenWidth * 0.74f
+                && bounds.right >= screenWidth * 0.70f
+                && bounds.top >= screenHeight * 0.005f
+                && bounds.centerY() <= screenHeight * 0.26f
+                && bounds.bottom <= screenHeight * 0.36f
+                && bounds.width() <= screenWidth * 0.22f
+                && bounds.height() <= screenHeight * 0.16f;
         if ((bounds.top < screenHeight * 0.025f
                     && !topRightCountdownControl && !topRightCloseGlyph)
                 || bounds.bottom > screenHeight * 0.96f) return false;
