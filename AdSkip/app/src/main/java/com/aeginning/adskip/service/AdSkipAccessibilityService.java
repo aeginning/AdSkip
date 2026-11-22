@@ -141,7 +141,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     .apply();
         }
         if (pkg.equals(getPackageName())) return;
-        if (!database.isAppEnabled(pkg)) return;
+        if (!database.isAppEnabled(pkg)) {
+            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                logDiagnostic("", "APP_NOT_ENABLED",
+                        "前台应用尚未在应用自动化中启用；为保护隐私不扫描页面，包名不写入日志");
+            }
+            return;
+        }
 
         long now = SystemClock.elapsedRealtime();
         if (now - lastScanAt < EVENT_INTERVAL_MS) {
@@ -447,6 +453,27 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
         };
         mainHandler.postDelayed(pendingNodeConfirmation, CLICK_CONFIRM_DELAY_MS);
+    }
+
+    private void logDiagnostic(String packageName, String action, String reason) {
+        if (destroyed || database == null || action == null) return;
+        String safePackage = packageName == null ? "" : packageName;
+        long interval;
+        if ("SCAN".equals(action)) interval = 4_000L;
+        else if ("SCAN_THROTTLED".equals(action)) interval = 5_000L;
+        else if ("APP_NOT_ENABLED".equals(action)) interval = 30_000L;
+        else interval = 1_200L;
+        if (!diagnosticThrottle.shouldLog(safePackage + "|" + action,
+                SystemClock.elapsedRealtime(), interval)) return;
+        String safeReason = reason == null ? "" : reason.trim();
+        if (safeReason.length() > 220) safeReason = safeReason.substring(0, 220);
+        try {
+            // Keep only package, event code and generic reason. Never store screen OCR
+            // text, editable values, notifications or raw candidate labels.
+            database.log(safePackage, "诊断", action, safeReason);
+        } catch (RuntimeException ignored) {
+            // A diagnostic failure must not crash the accessibility service.
+        }
     }
 
     private void cancelPendingNodeConfirmation() {
