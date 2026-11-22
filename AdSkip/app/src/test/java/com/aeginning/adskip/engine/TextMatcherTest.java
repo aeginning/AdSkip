@@ -112,6 +112,25 @@ public class TextMatcherTest {
         assertFalse(TextMatcher.isCloseGlyph("关闭"));
     }
 
+    @Test public void closeGlyphCompatibilityIncludesMoreUnicodeVariants() {
+        assertTrue(TextMatcher.isCloseGlyph("╳"));
+        assertTrue(TextMatcher.isCloseGlyph("⨯"));
+        assertTrue(TextMatcher.isCloseGlyph("☓"));
+        assertTrue(TextMatcher.isCloseGlyph("❎"));
+        assertTrue(TextMatcher.isCloseGlyph("✖️"));
+        assertFalse(TextMatcher.isCloseGlyph("X install"));
+    }
+
+    @Test public void dynamicCountdownAndOcrSpacingAreTolerated() {
+        assertTrue(TextMatcher.isCountdown("Skip in 00:05"));
+        assertTrue(TextMatcher.isCountdown("omitir en 5 segundos"));
+        assertTrue(TextMatcher.isCountdown("スキップ 3"));
+        assertTrue(TextMatcher.isCountdown("건너뛰기 3"));
+        assertEquals(100, TextMatcher.similarityPercent("Skip in 5 seconds", "Skip in 2 sec"));
+        assertEquals(100, TextMatcher.similarityPercent("跳过 3 秒", "跳过"));
+        assertTrue(TextMatcher.similarityPercent("Skip Ad", "Skip  Ad") >= 95);
+    }
+
     @Test public void sensitivityMappingIsMonotonic() {
         assertEquals(90, AdConfidenceScorer.minimumScoreForSensitivity(0));
         assertEquals(75, AdConfidenceScorer.minimumScoreForSensitivity(50));
