@@ -93,6 +93,35 @@ public class DnsFeedManagerTest {
         assertEquals(1_100, result.parsed.domains.size());
     }
 
+    @Test public void rejectsUntrustedHttpsRedirectAndFallsBack() throws Exception {
+        DnsFeedManager.Source source = DnsFeedManager.Source.HAGEZI_LIGHT;
+        Deque<HttpURLConnection> replies = new ArrayDeque<>();
+        replies.add(new FakeConnection(new URL(source.mirrorUrls.get(0)),
+                new URL("https://unexpected.example/list.txt"), 200,
+                validDnsmasq(), null, -1));
+        replies.add(new FakeConnection(new URL(source.mirrorUrls.get(1)), 200,
+                validDnsmasq(), null, -1));
+
+        DnsFeedManager.DownloadedFeed result = DnsFeedManager.download(source,
+                url -> replies.removeFirst(), millis -> { }, null);
+
+        assertEquals(source.mirrorUrls.get(1), result.downloadedFrom);
+    }
+
+    @Test public void rejectsOversizedResponseBeforeParsingAndFallsBack() throws Exception {
+        DnsFeedManager.Source source = DnsFeedManager.Source.STEVENBLACK_BASE;
+        Deque<HttpURLConnection> replies = new ArrayDeque<>();
+        replies.add(new FakeConnection(new URL(source.mirrorUrls.get(0)), 200,
+                new byte[0], null, 12L * 1024L * 1024L + 1L));
+        replies.add(new FakeConnection(new URL(source.mirrorUrls.get(1)), 200,
+                validHosts(), null, -1));
+
+        DnsFeedManager.DownloadedFeed result = DnsFeedManager.download(source,
+                url -> replies.removeFirst(), millis -> { }, null);
+
+        assertEquals(source.mirrorUrls.get(1), result.downloadedFrom);
+    }
+
     @Test public void doesNotRetryPermanentHttpErrorsOnSameMirror() throws Exception {
         DnsFeedManager.Source source = DnsFeedManager.Source.STEVENBLACK_BASE;
         Deque<HttpURLConnection> replies = new ArrayDeque<>();
@@ -155,12 +184,23 @@ public class DnsFeedManagerTest {
         private final String contentType;
 
         FakeConnection(URL url, int status, byte[] body, IOException failure, long declaredLength) {
-            this(url, status, body, failure, declaredLength, "text/plain");
+            this(url, url, status, body, failure, declaredLength, "text/plain");
         }
 
         FakeConnection(URL url, int status, byte[] body, IOException failure,
                        long declaredLength, String contentType) {
-            super(url);
+            this(url, url, status, body, failure, declaredLength, contentType);
+        }
+
+        FakeConnection(URL requestUrl, URL resolvedUrl, int status, byte[] body,
+                       IOException failure, long declaredLength) {
+            this(requestUrl, resolvedUrl, status, body, failure, declaredLength, "text/plain");
+        }
+
+        FakeConnection(URL requestUrl, URL resolvedUrl, int status, byte[] body,
+                       IOException failure, long declaredLength, String contentType) {
+            super(requestUrl);
+            this.url = resolvedUrl;
             this.status = status;
             this.body = body == null ? new byte[0] : body;
             this.failure = failure;
