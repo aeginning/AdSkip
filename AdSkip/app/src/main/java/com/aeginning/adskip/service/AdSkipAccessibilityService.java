@@ -1361,7 +1361,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             if (!isOcrEnabled() || generation != windowGeneration
                                     || !isActiveWindowSafeForTarget(expectedPackage, generation)
                                     || database == null || !database.isAppEnabled(expectedPackage)
-                                    || database.isLabelSuppressed(expectedPackage, line.getText())
+                                    || database.isLabelSuppressed(expectedPackage, observedLabel)
                                     || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
                                 logDiagnostic(expectedPackage, "OCR_CONFIRM_REVALIDATION_FAILED",
                                         "二次确认通过后执行前，窗口、应用规则或冷却状态发生变化");
