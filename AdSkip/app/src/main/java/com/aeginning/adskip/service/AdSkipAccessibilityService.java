@@ -404,7 +404,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 }
                 if (!SafetyPolicy.isSafeTarget(bounds, width, height,
                         clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
-                        label, context, isCountdownClickEnabled(), minimumScore)) {
+                        label, context, isCountdownClickEnabled(), minimumScore, customSkipWords)) {
                     unsafe++;
                     if (firstRejection.isEmpty()) firstRejection = "目标未通过最终安全区域或高风险操作策略";
                     continue;
@@ -885,7 +885,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 getResources().getDisplayMetrics().widthPixels,
                 getResources().getDisplayMetrics().heightPixels,
                 candidate.node.isClickable(), candidate.node.isEnabled(), candidate.node.isVisibleToUser(),
-                candidate.label, context, isCountdownClickEnabled(), minimumScore)) {
+                candidate.label, context, isCountdownClickEnabled(), minimumScore, customSkipWords)) {
             database.log(packageName, safeLogLabel(candidate.label), "BLOCKED",
                     "最终安全策略拒绝控件树候选；未执行点击");
             logDiagnostic(packageName, "CLICK_BLOCKED",
@@ -1365,7 +1365,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 isCountdownClickEnabled(), minimumScore, customSkipWords);
         if (assessment.score < minimumScore || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                 true, true, true, candidate.label, context,
-                isCountdownClickEnabled(), minimumScore)) {
+                isCountdownClickEnabled(), minimumScore, customSkipWords)) {
             database.log(expectedPackage, safeLogLabel(candidate.label), "BLOCKED",
                     "OCR 候选未通过置信度门槛或最终安全审核；未执行点击");
             logDiagnostic(expectedPackage, "OCR_BLOCKED",
@@ -1600,7 +1600,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                             first, second, getMinimumSkipScore())
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                                             true, true, true, observedLabel, context,
-                                            isCountdownClickEnabled(), getMinimumSkipScore())) {
+                                            isCountdownClickEnabled(), getMinimumSkipScore(), customSkipWords)) {
                                 logDiagnostic(expectedPackage, "OCR_CONFIRM_BLOCKED",
                                         "二次 OCR 文字位置匹配，但置信度或最终安全策略未通过");
                                 continue;
