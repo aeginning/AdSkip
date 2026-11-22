@@ -36,8 +36,8 @@ public class SkipWordLibraryTest {
 
     @Test public void mergeKeepsExistingEntriesAndDeduplicatesAdditions() {
         List<String> merged = SkipWordLibrary.merge(
-                Arrays.asList("稍后跳过", "关闭推广"), "关闭推广\n继续跳过");
-        assertEquals(Arrays.asList("稍后跳过", "关闭推广", "继续跳过"), merged);
-        assertEquals("稍后跳过\n关闭推广\n继续跳过", SkipWordLibrary.serialize(merged));
+                Arrays.asList("稍后跳过", "关闭推广"), "关闭推广\n马上略过");
+        assertEquals(Arrays.asList("稍后跳过", "关闭推广", "马上略过"), merged);
+        assertEquals("稍后跳过\n关闭推广\n马上略过", SkipWordLibrary.serialize(merged));
     }
 }
