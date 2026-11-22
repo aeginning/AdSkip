@@ -372,7 +372,9 @@ public final class DnsFeedManager {
         }
         if (failure instanceof HttpStatusException) {
             int status = ((HttpStatusException) failure).status;
-            boolean retryable = status == 408 || status == 425 || status == 429
+            // Respect 429 rate limits: fail over to another mirror, but do not
+            // immediately hammer the throttling host again.
+            boolean retryable = status == 408 || status == 425
                     || status == 500 || status == 502 || status == 503 || status == 504;
             return new AttemptFailure(FailureKind.HTTP, failure, retryable);
         }
