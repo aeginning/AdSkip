@@ -655,7 +655,7 @@ public final class RuleDatabase extends SQLiteOpenHelper {
     private static String formatLogRow(Cursor c) {
         return android.text.format.DateFormat.format("MM-dd HH:mm:ss", c.getLong(4))
                 + "  [" + c.getString(2) + "]  " + c.getString(0)
-                + "  " + c.getString(1) + "\\n     " + c.getString(3);
+                + "  " + c.getString(1) + "\n     " + c.getString(3);
     }
 
     public synchronized void clearLogs() { getWritableDatabase().delete("action_logs", null, null); }
