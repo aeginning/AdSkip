@@ -15,11 +15,13 @@ import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -523,9 +525,21 @@ public final class MainActivity extends Activity {
             if (seenPackages.add(info.activityInfo.packageName)) filtered.add(info);
         }
 
+        // Constrain the custom content before the dialog is shown. Previously the
+        // height was changed from OnShowListener, causing a full-height first layout
+        // followed by a second layout that visibly shrank the dialog.
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+        int maxListHeight = Math.min(dp(360), Math.max(dp(180), (int) (screenHeight * 0.42f)));
+
         ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(false);
+        scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(true);
+
+        FrameLayout listContainer = new FrameLayout(this);
+        listContainer.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, maxListHeight));
+        listContainer.addView(scroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -586,7 +600,7 @@ public final class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("选择启用自动跳广告的应用")
                 .setMessage("仅列出桌面启动器应用。勾选需要启用的应用；顶部可全选或取消全选。")
-                .setView(scroll)
+                .setView(listContainer)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存", (ignored, which) -> {
                     List<String> packages = new ArrayList<>(checks.size());
@@ -604,14 +618,8 @@ public final class MainActivity extends Activity {
                 })
                 .create();
 
-        // Keep the action buttons outside the scrolling area so they remain visible
-        // even when the device has many launcher applications or a short display.
-        dialog.setOnShowListener(ignored -> {
-            int screenHeight = getResources().getDisplayMetrics().heightPixels;
-            int maxListHeight = Math.min(dp(360), Math.max(dp(180), (int) (screenHeight * 0.42f)));
-            scroll.getLayoutParams().height = maxListHeight;
-            scroll.requestLayout();
-        });
+        // The list has a fixed maximum height from its first measure pass;
+        // only the list scrolls while the dialog action buttons remain visible.
         dialog.show();
     }
 
