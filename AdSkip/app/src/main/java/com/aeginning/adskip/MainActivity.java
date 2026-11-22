@@ -796,18 +796,26 @@ public final class MainActivity extends Activity {
 
 
     private void showDnsFeedDialog() {
+        DnsFeedManager.Source[] sources = {
+                DnsFeedManager.Source.HAGEZI_LIGHT,
+                DnsFeedManager.Source.STEVENBLACK_BASE,
+                DnsFeedManager.Source.ADAWAY_HOSTS,
+                DnsFeedManager.Source.ONEHOSTS_LITE,
+                DnsFeedManager.Source.DAN_POLLOCK_HOSTS
+        };
         String[] actions = {
                 "下载 / 更新 HaGeZi Multi LIGHT（轻量，建议先用）",
-                "下载 / 更新 StevenBlack Unified Hosts（覆盖更广）",
+                "下载 / 更新 StevenBlack Unified Hosts（覆盖较广）",
+                "下载 / 更新 AdAway Official Hosts（移动广告）",
+                "下载 / 更新 1Hosts Lite（轻量兼容）",
+                "下载 / 更新 Dan Pollock Hosts（独立来源）",
                 "管理已下载的 DNS 订阅"
         };
         new AlertDialog.Builder(this)
                 .setTitle("广告 DNS 规则库")
                 .setItems(actions, (dialog, which) -> {
-                    if (which == 0) {
-                        confirmDnsFeedDownload(DnsFeedManager.Source.HAGEZI_LIGHT);
-                    } else if (which == 1) {
-                        confirmDnsFeedDownload(DnsFeedManager.Source.STEVENBLACK_BASE);
+                    if (which >= 0 && which < sources.length) {
+                        confirmDnsFeedDownload(sources[which]);
                     } else {
                         showDnsFeedManagementDialog();
                     }
@@ -817,9 +825,16 @@ public final class MainActivity extends Activity {
     }
 
     private void confirmDnsFeedDownload(DnsFeedManager.Source source) {
-        String risk = source == DnsFeedManager.Source.HAGEZI_LIGHT
-                ? "这是偏轻量的广告与追踪域名规则，通常兼容性较好。仍可能影响部分 App 的广告、统计或个性化功能。"
-                : "这是覆盖较广的 hosts 聚合名单，不仅包含广告域名，也可能涉及恶意软件或追踪域名；误拦截风险高于轻量广告名单。建议先不要与其他大型名单同时启用。";
+        String risk;
+        if (source == DnsFeedManager.Source.HAGEZI_LIGHT
+                || source == DnsFeedManager.Source.ADAWAY_HOSTS
+                || source == DnsFeedManager.Source.ONEHOSTS_LITE) {
+            risk = "这是偏兼容性的广告与追踪域名规则。仍可能影响部分 App 的广告、统计或个性化功能；如果出现 App 异常，可以暂停该订阅。";
+        } else if (source == DnsFeedManager.Source.DAN_POLLOCK_HOSTS) {
+            risk = "这是独立维护的广告与隐私 hosts 名单。规则覆盖范围与维护策略不同，仍可能误拦截合法服务；建议先单独启用并观察。";
+        } else {
+            risk = "这是覆盖较广的 hosts 聚合名单，可能涉及广告、恶意软件或追踪域名；误拦截风险高于轻量名单。建议先不要与其他大型名单同时启用。";
+        }
         new AlertDialog.Builder(this)
                 .setTitle("下载 " + source.displayName)
                 .setMessage(source.description + "\n\n" + risk
