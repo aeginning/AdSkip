@@ -584,19 +584,27 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         public final int noActionCount;
         public final int dnsBlockCount;
         public final int errorCount;
-        Stats24h(int clicks, int blocked, int noAction, int dnsBlocks, int errors) {
+        public final int scanCount;
+        public final int noCandidateCount;
+        public final int ocrErrorCount;
+        Stats24h(int clicks, int blocked, int noAction, int dnsBlocks, int errors,
+                 int scans, int noCandidates, int ocrErrors) {
             clickCount = clicks; blockedCount = blocked; noActionCount = noAction;
             dnsBlockCount = dnsBlocks; errorCount = errors;
+            scanCount = scans; noCandidateCount = noCandidates; ocrErrorCount = ocrErrors;
         }
         public String toDisplayText() {
             return "近 24 小时：自动点击 " + clickCount + " 次，安全拦截 " + blockedCount
                     + " 次，未执行 " + noActionCount + " 次，DNS 拦截 " + dnsBlockCount
-                    + " 次，错误 " + errorCount + " 次。";
+                    + " 次，错误 " + errorCount + " 次。\n"
+                    + "诊断：控件扫描 " + scanCount + " 次，无候选 " + noCandidateCount
+                    + " 次，OCR 错误 " + ocrErrorCount + " 次。";
         }
     }
 
     public synchronized Stats24h getStats24h() {
         int clicks = 0, blocked = 0, noAction = 0, dnsBlocks = 0, errors = 0;
+        int scans = 0, noCandidates = 0, ocrErrors = 0;
         long since = System.currentTimeMillis() - 24L * 60L * 60L * 1000L;
         try (Cursor c = getReadableDatabase().rawQuery(
                 "SELECT action, COUNT(*) FROM action_logs WHERE created_at>=? GROUP BY action",
@@ -609,9 +617,14 @@ public final class RuleDatabase extends SQLiteOpenHelper {
                 else if ("NO_ACTION".equals(action)) noAction = count;
                 else if ("BLOCK".equals(action)) dnsBlocks = count;
                 else if ("ERROR".equals(action)) errors = count;
+                else if ("SCAN".equals(action)) scans = count;
+                else if ("NO_CANDIDATE".equals(action)) noCandidates = count;
+                else if (action != null && action.startsWith("OCR_")
+                        && action.endsWith("ERROR")) ocrErrors += count;
             }
         }
-        return new Stats24h(clicks, blocked, noAction, dnsBlocks, errors);
+        return new Stats24h(clicks, blocked, noAction, dnsBlocks, errors,
+                scans, noCandidates, ocrErrors);
     }
 
     public synchronized List<String> getRecentLogs(int limit) {
