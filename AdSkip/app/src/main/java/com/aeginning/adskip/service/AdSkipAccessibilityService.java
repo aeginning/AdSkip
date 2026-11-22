@@ -1108,13 +1108,36 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void confirmOcrCandidate(String expectedLabel, Rect firstBounds,
                                      String expectedPackage, long generation, int firstScore) {
-        if (ocrInFlight) return;
+        if (ocrInFlight) {
+            logDiagnostic(expectedPackage, "OCR_CONFIRM_BUSY", "另一轮 OCR 正在执行，二次截图确认已合并");
+            return;
+        }
         ocrInFlight = true;
         mainHandler.postDelayed(() -> {
-            if (destroyed || !isOcrEnabled() || !isActiveWindowSafeForTarget(expectedPackage, generation)
-                    || database == null || !database.isAppEnabled(expectedPackage)
-                    || database.isLabelSuppressed(expectedPackage, expectedLabel)
-                    || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
+            if (destroyed || database == null) {
+                ocrInFlight = false;
+                return;
+            }
+            if (!isOcrEnabled()) {
+                logDiagnostic(expectedPackage, "OCR_CONFIRM_DISABLED", "二次截图前 OCR 已关闭");
+                ocrInFlight = false;
+                return;
+            }
+            if (!isActiveWindowSafeForTarget(expectedPackage, generation)) {
+                logDiagnostic(expectedPackage, "OCR_CONFIRM_STALE",
+                        "二次截图前目标窗口发生变化或检测到敏感输入区域");
+                ocrInFlight = false;
+                return;
+            }
+            if (!database.isAppEnabled(expectedPackage)
+                    || database.isLabelSuppressed(expectedPackage, expectedLabel)) {
+                logDiagnostic(expectedPackage, "OCR_CONFIRM_RULE_BLOCKED",
+                        "二次截图前应用规则已关闭或候选已被用户屏蔽");
+                ocrInFlight = false;
+                return;
+            }
+            if (SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
+                logDiagnostic(expectedPackage, "CLICK_COOLDOWN", "二次截图确认时仍处于点击冷却期");
                 ocrInFlight = false;
                 return;
             }
@@ -1125,6 +1148,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         try {
                             bitmap = copyScreenshotBitmap(result);
                             if (bitmap == null) {
+                                logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR", "二次截图为空或无法转换为位图");
                                 ocrInFlight = false;
                                 return;
                             }
@@ -1132,18 +1156,24 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             if (bounded != bitmap && !bitmap.isRecycled()) bitmap.recycle();
                             runOcrConfirmation(bounded, expectedLabel, firstBounds, expectedPackage,
                                     generation, firstScore);
-                            bitmap = null; // Ownership transferred to runOcrConfirmation().
+                            bitmap = null;
                         } catch (Throwable failure) {
                             if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+                            logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR",
+                                    "二次截图预处理异常：" + failure.getClass().getSimpleName());
                             ocrInFlight = false;
                         }
                     }
 
                     @Override public void onFailure(int errorCode) {
+                        logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR",
+                                "Android 二次截图 API 失败，错误码=" + errorCode);
                         ocrInFlight = false;
                     }
                 });
-            } catch (Throwable ignored) {
+            } catch (Throwable failure) {
+                logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR",
+                        "请求二次截图异常：" + failure.getClass().getSimpleName());
                 ocrInFlight = false;
             }
         }, CLICK_CONFIRM_DELAY_MS);
@@ -1152,27 +1182,63 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void runOcrConfirmation(Bitmap bitmap, String expectedLabel, Rect firstBounds,
                                     String expectedPackage, long generation, int firstScore) {
+        List<TextRecognizer> recognizers = getRecognizerOrder(expectedLabel);
+        runOcrConfirmationPass(bitmap, expectedLabel, firstBounds, expectedPackage,
+                generation, firstScore, recognizers, 0);
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private void runOcrConfirmationPass(Bitmap bitmap, String expectedLabel, Rect firstBounds,
+                                        String expectedPackage, long generation, int firstScore,
+                                        List<TextRecognizer> recognizers, int recognizerIndex) {
+        if (destroyed || bitmap == null || bitmap.isRecycled()) {
+            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+            ocrInFlight = false;
+            return;
+        }
+        if (recognizerIndex >= recognizers.size()) {
+            if (!bitmap.isRecycled()) bitmap.recycle();
+            ocrInFlight = false;
+            if (database != null) {
+                database.log(expectedPackage, safeLogLabel(expectedLabel), "BLOCKED",
+                        "二次 OCR 未找到文字与位置均匹配的候选；未执行点击");
+            }
+            logDiagnostic(expectedPackage, "OCR_CONFIRM_NO_MATCH",
+                    "所有语言模型均未找到文字相似且位置一致的二次候选");
+            return;
+        }
+
+        TextRecognizer recognizer = recognizers.get(recognizerIndex);
+        final int bitmapWidth = bitmap.getWidth();
+        final int bitmapHeight = bitmap.getHeight();
         try {
-            InputImage image = InputImage.fromBitmap(bitmap, 0);
-            boolean chineseLocale = java.util.Locale.getDefault().getLanguage().startsWith("zh");
-            TextRecognizer recognizer = chineseLocale ? chineseRecognizer : latinRecognizer;
-            Task<Text> task = recognizer.process(image);
+            Task<Text> task = recognizer.process(InputImage.fromBitmap(bitmap, 0));
             task.addOnCompleteListener(completed -> {
+                boolean handedToFallback = false;
                 try {
-                    if (destroyed || !isOcrEnabled() || !completed.isSuccessful() || completed.getResult() == null
-                            || !isActiveWindowSafeForTarget(expectedPackage, generation)
-                            || database == null || !database.isAppEnabled(expectedPackage)
-                            || database.isLabelSuppressed(expectedPackage, expectedLabel)
-                            || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) return;
+                    if (destroyed) return;
+                    if (!completed.isSuccessful() || completed.getResult() == null) {
+                        logDiagnostic(expectedPackage, "OCR_CONFIRM_MODEL_ERROR",
+                                recognizerName(recognizer) + "模型二次识别失败");
+                        if (recognizerIndex + 1 < recognizers.size()) {
+                            handedToFallback = true;
+                            runOcrConfirmationPass(bitmap, expectedLabel, firstBounds, expectedPackage,
+                                    generation, firstScore, recognizers, recognizerIndex + 1);
+                        } else {
+                            logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR", "全部语言模型二次识别失败");
+                        }
+                        return;
+                    }
 
                     Text result = completed.getResult();
-                    String context = result.getText();
-                    List<String> suppressedLabels = database.getSuppressedLabels(expectedPackage);
+                    String context = result.getText() == null ? "" : result.getText();
+                    List<String> suppressedLabels = database == null
+                            ? java.util.Collections.emptyList() : database.getSuppressedLabels(expectedPackage);
                     int screenWidth = getResources().getDisplayMetrics().widthPixels;
                     int screenHeight = getResources().getDisplayMetrics().heightPixels;
-                    float scaleX = screenWidth / (float) Math.max(1, bitmap.getWidth());
-                    float scaleY = screenHeight / (float) Math.max(1, bitmap.getHeight());
-                    int tolerance = dp(48);
+                    float scaleX = screenWidth / (float) Math.max(1, bitmapWidth);
+                    float scaleY = screenHeight / (float) Math.max(1, bitmapHeight);
+                    boolean matched = false;
 
                     for (Text.TextBlock block : result.getTextBlocks()) {
                         for (Text.Line line : block.getLines()) {
@@ -1184,14 +1250,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             Rect mapped = new Rect(
                                     Math.round(box.left * scaleX), Math.round(box.top * scaleY),
                                     Math.round(box.right * scaleX), Math.round(box.bottom * scaleY));
-                            boolean sameArea = Math.abs(mapped.centerX() - firstBounds.centerX()) <= tolerance
-                                    && Math.abs(mapped.centerY() - firstBounds.centerY()) <= tolerance;
+                            boolean sameArea = TargetStability.areBoundsConsistent(
+                                    firstBounds.left, firstBounds.top, firstBounds.right, firstBounds.bottom,
+                                    mapped.left, mapped.top, mapped.right, mapped.bottom,
+                                    screenWidth, screenHeight, dp(28), dp(72));
                             if (!sameArea) continue;
 
                             AdConfidenceScorer.Assessment second = AdConfidenceScorer.assess(
                                     line.getText(), context, true, true, true, mapped.width(), mapped.height(),
-                                    screenWidth, screenHeight,
-                                    isCountdownClickEnabled(), getMinimumSkipScore());
+                                    screenWidth, screenHeight, isCountdownClickEnabled(), getMinimumSkipScore());
                             AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                                     firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
                                             : AdConfidenceScorer.Level.REVIEW, "首次 OCR 观察");
@@ -1200,31 +1267,85 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                             first, second, getMinimumSkipScore())
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                                             true, true, true, line.getText(), context,
-                                            isCountdownClickEnabled(), getMinimumSkipScore())) continue;
+                                            isCountdownClickEnabled(), getMinimumSkipScore())) {
+                                logDiagnostic(expectedPackage, "OCR_CONFIRM_BLOCKED",
+                                        "二次 OCR 文字位置匹配，但置信度或最终安全策略未通过");
+                                continue;
+                            }
 
                             if (!isOcrEnabled() || generation != windowGeneration
                                     || !isActiveWindowSafeForTarget(expectedPackage, generation)
-                                    || !database.isAppEnabled(expectedPackage)
+                                    || database == null || !database.isAppEnabled(expectedPackage)
                                     || database.isLabelSuppressed(expectedPackage, line.getText())
-                                    || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) return;
-                            if (dispatchTap(mapped.centerX(), mapped.centerY())) {
+                                    || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
+                                logDiagnostic(expectedPackage, "OCR_CONFIRM_REVALIDATION_FAILED",
+                                        "二次确认通过后执行前，窗口、应用规则或冷却状态发生变化");
+                                matched = true;
+                                break;
+                            }
+
+                            if (dispatchTap(mapped.centerX(), mapped.centerY(), expectedPackage)) {
                                 lastClickAt = SystemClock.elapsedRealtime();
                                 database.log(expectedPackage, safeLogLabel(line.getText()), "CLICK",
-                                        "OCR 二次截图确认相同文字与位置；置信度=" + second.score);
+                                        "多语言 OCR 二次截图确认文字、位置和安全策略；置信度="
+                                                + second.score + "；系统已接受手势请求");
+                                logDiagnostic(expectedPackage, "CLICK_DISPATCHED",
+                                        "OCR 二次确认手势已派发，等待点击结果验证");
+                                cancelPendingCountdownRescan();
+                                scheduleClickVerification(expectedPackage, line.getText(), mapped, "OCR 二次确认");
                                 refreshFloatingOverlay(true);
+                            } else {
+                                database.log(expectedPackage, safeLogLabel(line.getText()), "NO_ACTION",
+                                        "OCR 二次确认通过，但 Android 未接受坐标手势");
+                                logDiagnostic(expectedPackage, "OCR_GESTURE_REJECTED",
+                                        "二次 OCR 通过后 Android 未接受手势派发");
                             }
-                            return;
+                            matched = true;
+                            break;
                         }
+                        if (matched) break;
                     }
-                } catch (Throwable ignored) {
+
+                    if (!matched && recognizerIndex + 1 < recognizers.size()) {
+                        logDiagnostic(expectedPackage, "OCR_CONFIRM_FALLBACK",
+                                recognizerName(recognizer) + "未找到稳定候选，尝试下一个语言模型");
+                        handedToFallback = true;
+                        runOcrConfirmationPass(bitmap, expectedLabel, firstBounds, expectedPackage,
+                                generation, firstScore, recognizers, recognizerIndex + 1);
+                    } else if (!matched) {
+                        if (database != null) {
+                            database.log(expectedPackage, safeLogLabel(expectedLabel), "BLOCKED",
+                                    "二次 OCR 未找到文字与位置均匹配的候选；未执行点击");
+                        }
+                        logDiagnostic(expectedPackage, "OCR_CONFIRM_NO_MATCH",
+                                "二次截图未找到文字和位置均匹配的按钮");
+                    }
+                } catch (Throwable failure) {
+                    logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR",
+                            "二次 OCR 结果处理异常：" + failure.getClass().getSimpleName());
+                    if (!destroyed && recognizerIndex + 1 < recognizers.size()) {
+                        handedToFallback = true;
+                        runOcrConfirmationPass(bitmap, expectedLabel, firstBounds, expectedPackage,
+                                generation, firstScore, recognizers, recognizerIndex + 1);
+                    }
                 } finally {
-                    if (!bitmap.isRecycled()) bitmap.recycle();
-                    ocrInFlight = false;
+                    if (!handedToFallback) {
+                        if (!bitmap.isRecycled()) bitmap.recycle();
+                        ocrInFlight = false;
+                    }
                 }
             });
-        } catch (Throwable ignored) {
-            if (!bitmap.isRecycled()) bitmap.recycle();
-            ocrInFlight = false;
+        } catch (Throwable failure) {
+            logDiagnostic(expectedPackage, "OCR_CONFIRM_MODEL_ERROR",
+                    recognizerName(recognizer) + "调用二次识别异常：" + failure.getClass().getSimpleName());
+            if (recognizerIndex + 1 < recognizers.size()) {
+                runOcrConfirmationPass(bitmap, expectedLabel, firstBounds, expectedPackage,
+                        generation, firstScore, recognizers, recognizerIndex + 1);
+            } else {
+                if (!bitmap.isRecycled()) bitmap.recycle();
+                ocrInFlight = false;
+                logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR", "全部二次 OCR 模型调用失败");
+            }
         }
     }
 
