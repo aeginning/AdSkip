@@ -334,6 +334,9 @@ public final class DnsFeedManager {
             if (finalUrl == null || !"https".equalsIgnoreCase(finalUrl.getProtocol())) {
                 throw new IOException("规则源重定向离开 HTTPS");
             }
+            if (!isAllowedRedirectHost(source, finalUrl.getHost())) {
+                throw new IOException("规则源重定向到未授权镜像主机");
+            }
             long contentLength = connection.getContentLengthLong();
             if (contentLength > MAX_DOWNLOAD_BYTES) throw new SizeLimitException();
 
@@ -342,12 +345,25 @@ public final class DnsFeedManager {
                 throw new IOException("服务器返回 HTML 页面而不是规则文件");
             }
 
-            try (InputStream input = new BoundedInputStream(connection.getInputStream(), MAX_DOWNLOAD_BYTES)) {
+            try (InputStream input = new BoundedInputStream(
+                    connection.getInputStream(), MAX_DOWNLOAD_BYTES, deadlineNanos)) {
                 return DnsFeedParser.parse(input, source.format);
             }
         } finally {
             if (connection != null) connection.disconnect();
         }
+    }
+
+    private static boolean isAllowedRedirectHost(Source source, String finalHost) {
+        if (finalHost == null) return false;
+        for (String mirror : source.mirrorUrls) {
+            try {
+                if (finalHost.equalsIgnoreCase(new URL(mirror).getHost())) return true;
+            } catch (Exception ignored) {
+                // Source URLs are validated as HTTPS during enum initialization.
+            }
+        }
+        return false;
     }
 
     private static AttemptFailure classify(IOException failure) {
@@ -436,14 +452,23 @@ public final class DnsFeedManager {
 
     private static final class BoundedInputStream extends FilterInputStream {
         private final long maxBytes;
+        private final long deadlineNanos;
         private long bytesRead;
 
-        BoundedInputStream(InputStream input, long maxBytes) {
+        BoundedInputStream(InputStream input, long maxBytes, long deadlineNanos) {
             super(input);
             this.maxBytes = maxBytes;
+            this.deadlineNanos = deadlineNanos;
+        }
+
+        private void checkDeadline() throws IOException {
+            if (isDeadlineReached(deadlineNanos)) {
+                throw new SocketTimeoutException("DNS feed download exceeded total time budget");
+            }
         }
 
         @Override public int read() throws IOException {
+            checkDeadline();
             int value = super.read();
             if (value >= 0) {
                 bytesRead++;
@@ -453,6 +478,7 @@ public final class DnsFeedManager {
         }
 
         @Override public int read(byte[] buffer, int offset, int length) throws IOException {
+            checkDeadline();
             if (length == 0) return 0;
             long remainingWithProbe = maxBytes - bytesRead + 1;
             if (remainingWithProbe <= 0) throw new SizeLimitException();
