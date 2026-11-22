@@ -21,14 +21,14 @@ public final class TextMatcher {
     private static final String[] AD_CONTEXT = {
             "广告", "赞助内容", "推广内容", "广告倒计时", "广告播放中",
             "赞助广告", "推广广告", "商业推广", "sponsored", "sponsored content",
-            "promoted content", "advertisement", "advertising", "ad content", "秒后跳过"
+            "promoted content", "advertisement", "advertising", "ad content", "广告", "広告", "광고", "秒后跳过"
     };
 
     private static final String[] EXPLICIT_SKIP_AD = {
             "跳过广告", "跳过此广告", "跳过当前广告", "跳过视频广告",
             "跳过当前视频广告", "跳过开屏广告", "跳过片头广告", "广告跳过",
             "skip ad", "skip ads", "skip this ad", "skip current ad",
-            "skip video ad", "skip this video ad", "skip advertisement",
+            "skip video ad", "skip this video ad", "skip current video ad", "skip current video advertisement", "skip advertisement",
             "skip sponsored ad", "skip sponsored content",
             "広告をスキップ", "광고 건너뛰기"
     };
