@@ -25,8 +25,15 @@ import java.net.Socket;
 import java.net.InetSocketAddress;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /** DNS-only VPN: routes only the synthetic DNS resolver address, not all device traffic. */
 public final class DnsFilterVpnService extends VpnService {
@@ -37,10 +44,31 @@ public final class DnsFilterVpnService extends VpnService {
     private static final String LOCAL_DNS_V4 = "10.111.0.2";
     private static final String LOCAL_DNS_V6 = "fd00:ad5:1::2";
     private static final String[] UPSTREAM_DNS = {
-            "1.1.1.1", "2606:4700:4700::1111", "8.8.8.8", "2001:4860:4860::8888"
+            // Prefer IPv4 first for networks without working IPv6; keep alternate providers.
+            "1.1.1.1", "8.8.8.8", "9.9.9.9",
+            "2606:4700:4700::1111", "2001:4860:4860::8888", "2620:fe::fe"
     };
+    private static final long REPEATED_DOMAIN_LOG_INTERVAL_MS = 30_000L;
+    private static final int MAX_LOG_THROTTLE_ENTRIES = 512;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ThreadPoolExecutor packetWorkers = new ThreadPoolExecutor(
+            4, 4, 30L, TimeUnit.SECONDS, new ArrayBlockingQueue<>(96),
+            new ThreadFactory() {
+                private int index;
+                @Override public synchronized Thread newThread(Runnable task) {
+                    Thread thread = new Thread(task, "AdSkip-DNS-" + (++index));
+                    thread.setPriority(Thread.NORM_PRIORITY - 1);
+                    return thread;
+                }
+            }, new ThreadPoolExecutor.AbortPolicy());
+    private final Object tunWriteLock = new Object();
+    private final LinkedHashMap<String, Long> lastDomainLogAt =
+            new LinkedHashMap<String, Long>(64, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(Map.Entry<String, Long> eldest) {
+                    return size() > MAX_LOG_THROTTLE_ENTRIES;
+                }
+            };
     private volatile boolean running;
     private static volatile boolean sRunning;
     private ParcelFileDescriptor tunnel;
@@ -91,7 +119,7 @@ public final class DnsFilterVpnService extends VpnService {
             running = true;
             sRunning = true;
             getSharedPreferences("adskip_settings", MODE_PRIVATE).edit().putBoolean("dns_active", true).apply();
-            database.log("VPN", "", "START", "DNS-only IPv4/IPv6 UDP/53 filtering; upstream TCP fallback for truncated UDP responses");
+            database.log("VPN", "", "START", "DNS-only IPv4/IPv6 UDP/53; bounded parallel packet processing, 3 upstream providers and TCP fallback for truncated UDP responses");
             worker.execute(this::readPackets);
         } catch (Exception e) {
             database.log("VPN", "", "ERROR", e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -109,27 +137,17 @@ public final class DnsFilterVpnService extends VpnService {
                 int length = input.read(buffer);
                 if (length < 0) throw new java.io.IOException("TUN interface closed unexpectedly");
                 if (length == 0) continue;
-                DnsPacketCodec.Query query = DnsPacketCodec.parseQuery(buffer, length);
-                if (query == null) continue;
-                byte[] dnsResponse;
-                if (database.isDomainBlocked(query.domain)) {
-                    dnsResponse = DnsPacketCodec.blockedNxDomain(query.dnsPayload);
-                    database.log("DNS", query.domain, "BLOCK", "Matched local domain rule");
-                } else {
-                    dnsResponse = responseCache.get(query.dnsPayload, SystemClock.elapsedRealtime());
-                    if (dnsResponse == null) {
-                        dnsResponse = forwardDns(query.dnsPayload);
-                        if (dnsResponse == null) {
-                            database.log("DNS", query.domain, "ERROR", "All configured upstream DNS transports failed; returned SERVFAIL");
-                            dnsResponse = DnsPacketCodec.servFail(query.dnsPayload);
-                            if (dnsResponse == null) continue;
-                        } else {
-                            responseCache.put(query.dnsPayload, dnsResponse, SystemClock.elapsedRealtime());
-                        }
-                    }
+
+                // Each worker owns an immutable packet copy. The reader never waits for
+                // upstream DNS timeouts, so one slow resolver cannot stall all clients.
+                byte[] packet = java.util.Arrays.copyOf(buffer, length);
+                try {
+                    packetWorkers.execute(() -> processDnsPacket(packet, output));
+                } catch (RejectedExecutionException overloaded) {
+                    // Bounded queue protects memory under packet floods; fail this query
+                    // explicitly rather than growing an unbounded queue or blocking reads.
+                    sendOverloadServFail(packet, output);
                 }
-                byte[] responsePacket = DnsPacketCodec.buildResponse(query, dnsResponse);
-                if (responsePacket != null) output.write(responsePacket);
             }
         } catch (Exception e) {
             if (running) {
@@ -139,6 +157,77 @@ public final class DnsFilterVpnService extends VpnService {
                     stopSelf();
                 });
             }
+        }
+    }
+
+    private void processDnsPacket(byte[] packet, FileOutputStream output) {
+        if (!running || packet == null) return;
+        try {
+            DnsPacketCodec.Query query = DnsPacketCodec.parseQuery(packet, packet.length);
+            if (query == null) return;
+
+            byte[] dnsResponse;
+            if (database.isDomainBlocked(query.domain)) {
+                dnsResponse = DnsPacketCodec.blockedNxDomain(query.dnsPayload);
+                if (shouldLogDomainEvent(query.domain, SystemClock.elapsedRealtime())) {
+                    database.log("DNS", query.domain, "BLOCK", "Matched local manual/subscription domain rule");
+                }
+            } else {
+                dnsResponse = responseCache.get(query.dnsPayload, SystemClock.elapsedRealtime());
+                if (dnsResponse == null) {
+                    dnsResponse = forwardDns(query.dnsPayload);
+                    if (dnsResponse == null) {
+                        if (shouldLogDomainEvent("upstream:" + query.domain, SystemClock.elapsedRealtime())) {
+                            database.log("DNS", query.domain, "ERROR",
+                                    "All configured upstream DNS transports failed; returned SERVFAIL");
+                        }
+                        dnsResponse = DnsPacketCodec.servFail(query.dnsPayload);
+                        if (dnsResponse == null) return;
+                    } else {
+                        responseCache.put(query.dnsPayload, dnsResponse, SystemClock.elapsedRealtime());
+                    }
+                }
+            }
+
+            byte[] responsePacket = DnsPacketCodec.buildResponse(query, dnsResponse);
+            if (responsePacket != null) writeTunResponse(output, responsePacket);
+        } catch (Exception ignored) {
+            // A malformed or failed individual packet must not terminate the VPN reader.
+        }
+    }
+
+    private void sendOverloadServFail(byte[] packet, FileOutputStream output) {
+        if (!running || packet == null) return;
+        DnsPacketCodec.Query query = DnsPacketCodec.parseQuery(packet, packet.length);
+        if (query == null) return;
+        byte[] failure = DnsPacketCodec.servFail(query.dnsPayload);
+        byte[] response = failure == null ? null : DnsPacketCodec.buildResponse(query, failure);
+        if (response != null) writeTunResponse(output, response);
+        if (shouldLogDomainEvent("overload", SystemClock.elapsedRealtime())) {
+            database.log("DNS", query.domain, "ERROR",
+                    "DNS worker queue is full; returned SERVFAIL to protect device responsiveness");
+        }
+    }
+
+    private void writeTunResponse(FileOutputStream output, byte[] responsePacket) {
+        if (!running || output == null || responsePacket == null) return;
+        synchronized (tunWriteLock) {
+            if (!running) return;
+            try {
+                output.write(responsePacket);
+            } catch (java.io.IOException ignored) {
+                // Reader loop owns the descriptor and will report tunnel failure.
+            }
+        }
+    }
+
+    private boolean shouldLogDomainEvent(String key, long nowElapsed) {
+        if (key == null) return false;
+        synchronized (lastDomainLogAt) {
+            Long previous = lastDomainLogAt.get(key);
+            if (previous != null && nowElapsed - previous < REPEATED_DOMAIN_LOG_INTERVAL_MS) return false;
+            lastDomainLogAt.put(key, nowElapsed);
+            return true;
         }
     }
 
@@ -163,7 +252,7 @@ public final class DnsFilterVpnService extends VpnService {
     private byte[] forwardDnsUdp(byte[] query, InetAddress address) {
         try (DatagramSocket socket = new DatagramSocket()) {
             if (!protect(socket)) return null;
-            socket.setSoTimeout(1800);
+            socket.setSoTimeout(1400);
             socket.connect(address, 53); // Restrict replies to the selected upstream endpoint.
             DatagramPacket request = new DatagramPacket(query, query.length);
             socket.send(request);
@@ -180,8 +269,8 @@ public final class DnsFilterVpnService extends VpnService {
     private byte[] forwardDnsTcp(byte[] query, InetAddress address) {
         try (Socket socket = new Socket()) {
             if (!protect(socket)) return null;
-            socket.connect(new InetSocketAddress(address, 53), 1800);
-            socket.setSoTimeout(2200);
+            socket.connect(new InetSocketAddress(address, 53), 1400);
+            socket.setSoTimeout(1700);
             DataOutputStream out = new DataOutputStream(socket.getOutputStream());
             DataInputStream in = new DataInputStream(socket.getInputStream());
             out.writeShort(query.length);
@@ -199,6 +288,7 @@ public final class DnsFilterVpnService extends VpnService {
         boolean wasActive = running || tunnel != null;
         running = false;
         sRunning = false;
+        packetWorkers.shutdownNow();
         getSharedPreferences("adskip_settings", MODE_PRIVATE).edit().putBoolean("dns_active", false).apply();
         if (tunnel != null) {
             try { tunnel.close(); } catch (Exception ignored) { }
