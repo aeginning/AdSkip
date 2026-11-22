@@ -1,9 +1,18 @@
 # AdSkip 智能跳广告助手
 
-版本：**1.3.4**（全量质量优化版）
+版本：**1.3.5**（DNS 订阅网络恢复增强版）
 包名：`com.aeginning.adskip`
 技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
 最低系统：Android 8.0（API 26）
+
+## 1.3.5 DNS 订阅网络恢复增强
+
+- 新增 AdAway Official Hosts、1Hosts Lite、Dan Pollock Hosts 三个独立维护来源；原有 HaGeZi Multi LIGHT 与 StevenBlack Unified Hosts 保留。
+- 每个 HTTP(S) 镜像有独立 12 秒尝试预算；连接超时 5 秒、读取超时 7 秒；整个更新仍有 90 秒总预算。
+- 临时连接失败最多追加 3 次重试，退避间隔为 1 秒、2.5 秒、5 秒；所有来源仍受 12 MiB 下载上限和 120,000 域名解析上限保护。
+- 每次镜像请求都通过 Android 当前默认 Network 建立连接；Wi-Fi/移动网络切换后，下一次镜像或重试会重新获取默认网络，不静默绕过用户的系统 VPN。
+- 增加 ACCESS_NETWORK_STATE 权限，只显示 VPN/Wi-Fi/移动网络等类型及互联网验证状态，不读取 SSID、IP 或上传网络信息；失败对话框附加当前网络诊断。
+- 下载文件必须通过 HTTPS、重定向主机白名单、格式和域名数量验证后，才会在 SQLite 事务内替换对应订阅；失败不触碰旧订阅或手工规则。
 
 ## 1.3.4 全量质量优化
 
@@ -14,10 +23,10 @@
 - 移除已失效的嵌套 CI 工作流；唯一生效的仓库级工作流位于 `.github/workflows/android.yml`。
 - 同步 README、DNS 第三方来源说明和 CI Artifact 命名，保留原始 1.2.0 源码 ZIP 作为历史快照。
 
-## 1.3.3 DNS 下载可靠性增强
+## 1.3.3 DNS 下载可靠性增强（已由 1.3.5 进一步升级）
 
 - HaGeZi Multi LIGHT 和 StevenBlack Unified Hosts 增加多个 HTTPS 镜像，先尝试每个镜像，再对临时连接故障进行限次退避重试。
-- 增加 90 秒总时间、9 秒连接超时、15 秒读取超时、12 MiB 流式大小上限、HTTPS 与受信任镜像重定向检查。
+- 历史版本曾使用 9 秒连接、15 秒读取超时；1.3.5 改为每镜像 12 秒预算（5 秒连接 / 7 秒读取），保留 90 秒总预算和 12 MiB 流式大小上限。
 - 展示镜像切换进度、错误分类和重试入口；下载与内容校验完全通过后才以事务替换订阅，失败不改动旧规则。
 
 ## 1.3.0 功能基线
@@ -31,9 +40,12 @@
 
 ### DNS 规则库与订阅
 - 手工域名规则继续独立维护，不会与大型下载订阅混在同一个文本编辑框中。
-- 新增 HaGeZi Multi LIGHT（轻量优先）和 StevenBlack Unified Hosts（覆盖较广）两个用户主动下载/更新的来源。
+- 支持 HaGeZi Multi LIGHT、StevenBlack Unified Hosts、AdAway Official Hosts、1Hosts Lite、Dan Pollock Hosts 五个用户主动下载/更新的来源。
 - 订阅通过 HTTPS 下载，按 dnsmasq / hosts 格式严格解析；拒绝不支持的规则语法、URL、IP、单标签、本地域名、反向解析区和常见公共后缀。
 - 下载文件限制为 12 MiB，最多 120,000 条唯一域名；少于 1,000 条或格式/域名校验失败时，拒绝导入。
+- 单镜像尝试预算 12 秒（连接 5 秒 / 读取 7 秒），整个更新最多 90 秒；临时连接错误最多追加 3 次退避重试。
+- 每次请求使用 Android 当前默认 Network，网络切换后后续镜像会重新获取当前网络；不会静默绕过系统 VPN。
+- 更新失败信息显示当前网络类型和互联网验证状态，不采集 SSID/IP，也不会上传网络信息。
 - 每个订阅独立存储、开关、更新或删除。更新在 SQLite 事务内替换单个订阅；失败回滚，不覆盖手工规则或其他订阅；原订阅的启停状态在更新后保留。
 - DNS 域名查询使用带上限的 LRU 结果缓存和索引查询；订阅元数据计数用于快速展示总量，界面显示为约数以说明跨列表重复域名。
 - 增加常见公共后缀保护（如 co.uk、com.cn、com.sg），避免误把整个地区域名树加入黑名单。
@@ -143,7 +155,7 @@
 
 - 新增兼容性报告：Android 版本/API、设备型号、OCR 截图 API 能力、无障碍状态、DNS VPN 状态、Shizuku 状态、Java 堆内存快照、已启用 App 数和本地统计。
 - GitHub Actions 使用 JDK 17 和 Gradle 8.11.1，执行 JUnit、Android Lint、Debug APK 构建，并分别上传 APK 和测试报告。
-- CI Artifact：`AdSkip-1.3.0-debug-apk` 和 `AdSkip-1.3.0-reports`。
+- CI Artifact：`AdSkip-1.3.5-debug-apk` 和 `AdSkip-1.3.5-reports`。
 
 ## 2. 工程结构
 

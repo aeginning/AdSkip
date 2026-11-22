@@ -1,5 +1,10 @@
 package com.aeginning.adskip.service;
 
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+
 import com.aeginning.adskip.engine.DnsFeedParser;
 
 import java.io.FilterInputStream;
@@ -22,12 +27,13 @@ import java.util.List;
  * replacement remain separate: callers import only a fully downloaded, validated feed.
  */
 public final class DnsFeedManager {
-    private static final int CONNECT_TIMEOUT_MS = 9_000;
-    private static final int READ_TIMEOUT_MS = 15_000;
+    private static final int CONNECT_TIMEOUT_MS = 5_000;
+    private static final int READ_TIMEOUT_MS = 7_000;
+    private static final long MAX_MIRROR_ATTEMPT_MS = 12_000L;
     private static final long MAX_DOWNLOAD_BYTES = 12L * 1024L * 1024L;
     private static final long MAX_TOTAL_TIME_MS = 90_000L;
-    private static final int MAX_EXTRA_RETRIES = 2;
-    private static final long[] RETRY_BACKOFF_MS = {500L, 1_200L};
+    private static final int MAX_EXTRA_RETRIES = 3;
+    private static final long[] RETRY_BACKOFF_MS = {1_000L, 2_500L, 5_000L};
     private static final int MAX_DIAGNOSTICS = 8;
 
     public enum Source {
@@ -53,6 +59,34 @@ public final class DnsFeedManager {
                         "https://cdn.jsdelivr.net/gh/StevenBlack/hosts@master/hosts",
                         "https://fastly.jsdelivr.net/gh/StevenBlack/hosts@master/hosts",
                         "https://gcore.jsdelivr.net/gh/StevenBlack/hosts@master/hosts"
+                }),
+        ADAWAY_HOSTS(
+                "adaway-hosts",
+                "AdAway Official Hosts",
+                DnsFeedParser.Format.HOSTS,
+                "AdAway 维护的移动广告与跟踪域名名单；与 HaGeZi、StevenBlack 使用不同维护项目",
+                new String[]{
+                        "https://adaway.org/hosts.txt",
+                        "https://raw.githubusercontent.com/AdAway/adaway.github.io/master/hosts.txt",
+                        "https://cdn.jsdelivr.net/gh/AdAway/adaway.github.io@master/hosts.txt"
+                }),
+        ONEHOSTS_LITE(
+                "1hosts-lite",
+                "1Hosts Lite",
+                DnsFeedParser.Format.DNSMASQ,
+                "偏兼容性的轻量广告、跟踪与恶意域名名单；使用约 10 万条的 dnsmasq 格式，优先选择 Lite 而非高误拦截的 Xtra",
+                new String[]{
+                        "https://badmojr.github.io/1Hosts/Lite/dnsmasq.conf",
+                        "https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/dnsmasq.conf",
+                        "https://cdn.jsdelivr.net/gh/badmojr/1Hosts@master/Lite/dnsmasq.conf"
+                }),
+        DAN_POLLOCK_HOSTS(
+                "dan-pollock-hosts",
+                "Dan Pollock Hosts",
+                DnsFeedParser.Format.HOSTS,
+                "独立维护的广告与隐私 hosts 名单；仅使用官方来源",
+                new String[]{
+                        "https://someonewhocares.org/hosts/zero/hosts"
                 });
 
         public final String id;
@@ -205,7 +239,7 @@ public final class DnsFeedManager {
     private DnsFeedManager() { }
 
     public static DownloadedFeed download(Source source) throws IOException {
-        return download(source, null);
+        return download(source, (ProgressListener) null);
     }
 
     public static DownloadedFeed download(Source source, ProgressListener listener) throws IOException {
@@ -213,6 +247,66 @@ public final class DnsFeedManager {
                 url -> (HttpURLConnection) url.openConnection(),
                 Thread::sleep,
                 listener);
+    }
+
+    /** Uses the current Android default network on every attempt, including after network handover. */
+    public static DownloadedFeed download(Source source, Context context,
+                                          ProgressListener listener) throws IOException {
+        if (context == null) throw new IllegalArgumentException("Android context required");
+        Context appContext = context.getApplicationContext();
+        String networkLabel = describeActiveNetwork(appContext);
+        notifyProgress(listener, "当前网络：" + networkLabel + "；准备连接 DNS 订阅源…");
+        return download(source,
+                url -> openOnActiveNetwork(appContext, url),
+                Thread::sleep,
+                listener);
+    }
+
+    /** No SSID, IP address, or other identifying network details are exposed. */
+    public static String describeActiveNetwork(Context context) {
+        if (context == null) return "网络状态未知";
+        try {
+            ConnectivityManager manager = (ConnectivityManager)
+                    context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (manager == null) return "网络状态未知";
+            Network active = manager.getActiveNetwork();
+            NetworkCapabilities caps = active == null ? null : manager.getNetworkCapabilities(active);
+            if (caps == null) return "未检测到可用网络";
+            String type;
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) type = "VPN";
+            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) type = "Wi-Fi";
+            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) type = "移动网络";
+            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) type = "以太网";
+            else type = "其他网络";
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                return type + "（无互联网能力）";
+            }
+            return type + (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    ? "（互联网已验证）" : "（互联网尚未验证）");
+        } catch (RuntimeException unavailable) {
+            return "网络状态暂不可读取";
+        }
+    }
+
+    private static HttpURLConnection openOnActiveNetwork(Context context, URL url) throws IOException {
+        ConnectivityManager manager = (ConnectivityManager)
+                context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (manager != null) {
+            Network active = manager.getActiveNetwork();
+            if (active != null) {
+                try {
+                    java.net.URLConnection opened = active.openConnection(url);
+                    if (!(opened instanceof HttpURLConnection)) {
+                        throw new IOException("当前网络未提供 HTTP 连接");
+                    }
+                    return (HttpURLConnection) opened;
+                } catch (RuntimeException networkChanged) {
+                    // The default network can disappear between getActiveNetwork() and openConnection().
+                    // Re-resolve through the system default route; the next mirror re-reads it again.
+                }
+            }
+        }
+        return (HttpURLConnection) url.openConnection();
     }
 
     static DownloadedFeed download(Source source, ConnectionFactory connections,
@@ -309,7 +403,9 @@ public final class DnsFeedManager {
             throw new IOException("只允许 HTTPS DNS 订阅源");
         }
 
-        long remainingMs = remainingMillis(deadlineNanos);
+        long attemptDeadlineNanos = Math.min(deadlineNanos,
+                System.nanoTime() + MAX_MIRROR_ATTEMPT_MS * 1_000_000L);
+        long remainingMs = remainingMillis(attemptDeadlineNanos);
         if (remainingMs <= 0) throw new IOException("下载总时间达到上限");
         HttpURLConnection connection = null;
         try {
@@ -323,7 +419,7 @@ public final class DnsFeedManager {
             connection.setRequestMethod("GET");
             connection.setRequestProperty("Accept", "text/plain, application/octet-stream;q=0.9, */*;q=0.5");
             connection.setRequestProperty("Accept-Encoding", "identity");
-            connection.setRequestProperty("User-Agent", "AdSkip-Android/1.3.3");
+            connection.setRequestProperty("User-Agent", "AdSkip-Android/1.3.5");
 
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) throw new HttpStatusException(status);
@@ -344,7 +440,7 @@ public final class DnsFeedManager {
             }
 
             try (InputStream input = new BoundedInputStream(
-                    connection.getInputStream(), MAX_DOWNLOAD_BYTES, deadlineNanos)) {
+                    connection.getInputStream(), MAX_DOWNLOAD_BYTES, attemptDeadlineNanos)) {
                 return DnsFeedParser.parse(input, source.format);
             }
         } finally {
