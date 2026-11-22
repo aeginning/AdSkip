@@ -449,8 +449,7 @@ public final class RuleDatabase extends SQLiteOpenHelper {
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
-            blockedDomainCache = null;
-            blockedDomainCacheAt = 0;
+            clearDomainLookupCache();
         }
     }
 
