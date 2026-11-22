@@ -194,12 +194,10 @@ public final class DnsFeedManager {
 
     private static final class AttemptFailure {
         final FailureKind kind;
-        final IOException cause;
         final boolean retryable;
 
-        AttemptFailure(FailureKind kind, IOException cause, boolean retryable) {
+        AttemptFailure(FailureKind kind, boolean retryable) {
             this.kind = kind;
-            this.cause = cause;
             this.retryable = retryable;
         }
     }
@@ -368,7 +366,7 @@ public final class DnsFeedManager {
 
     private static AttemptFailure classify(IOException failure) {
         if (failure instanceof SizeLimitException) {
-            return new AttemptFailure(FailureKind.SIZE_LIMIT, failure, false);
+            return new AttemptFailure(FailureKind.SIZE_LIMIT, false);
         }
         if (failure instanceof HttpStatusException) {
             int status = ((HttpStatusException) failure).status;
@@ -376,33 +374,33 @@ public final class DnsFeedManager {
             // immediately hammer the throttling host again.
             boolean retryable = status == 408 || status == 425
                     || status == 500 || status == 502 || status == 503 || status == 504;
-            return new AttemptFailure(FailureKind.HTTP, failure, retryable);
+            return new AttemptFailure(FailureKind.HTTP, retryable);
         }
 
         String message = failure.getMessage() == null ? "" : failure.getMessage().toLowerCase(java.util.Locale.ROOT);
         if (message.contains("重定向") || message.contains("https")) {
-            return new AttemptFailure(FailureKind.REDIRECT, failure, false);
+            return new AttemptFailure(FailureKind.REDIRECT, false);
         }
         if (message.contains("exceeds 12 mib") || message.contains("12 mib")) {
-            return new AttemptFailure(FailureKind.SIZE_LIMIT, failure, false);
+            return new AttemptFailure(FailureKind.SIZE_LIMIT, false);
         }
         if (failure instanceof SocketTimeoutException || failure instanceof SocketException
                 || failure instanceof UnknownHostException
                 || failure instanceof java.io.EOFException) {
-            return new AttemptFailure(FailureKind.CONNECTION, failure, true);
+            return new AttemptFailure(FailureKind.CONNECTION, true);
         }
         if (message.contains("only ") && message.contains("domains found")
                 || message.contains("validation failed")
                 || message.contains("html")
                 || message.contains("invalid domain")) {
-            return new AttemptFailure(FailureKind.VALIDATION, failure, false);
+            return new AttemptFailure(FailureKind.VALIDATION, false);
         }
         // A connection reset may be wrapped by an implementation-specific IOException.
         if (message.contains("connection reset") || message.contains("timed out")
                 || message.contains("failed to connect")) {
-            return new AttemptFailure(FailureKind.CONNECTION, failure, true);
+            return new AttemptFailure(FailureKind.CONNECTION, true);
         }
-        return new AttemptFailure(FailureKind.UNKNOWN, failure, false);
+        return new AttemptFailure(FailureKind.UNKNOWN, false);
     }
 
     private static void notifyProgress(ProgressListener listener, String message) {
