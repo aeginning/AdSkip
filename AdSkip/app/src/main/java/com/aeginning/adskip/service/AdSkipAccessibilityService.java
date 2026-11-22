@@ -424,6 +424,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private void refreshFloatingOverlay(boolean force) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(() -> refreshFloatingOverlay(force));
+            return;
+        }
         if (floatingStatusOverlay != null) floatingStatusOverlay.refresh(database, true, force);
     }
 
