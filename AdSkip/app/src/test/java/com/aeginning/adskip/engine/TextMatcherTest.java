@@ -74,7 +74,16 @@ public class TextMatcherTest {
         assertTrue(TextMatcher.isCountdown("Skip 3"));
         assertTrue(TextMatcher.isCountdown("Skip 3s"));
         assertTrue(TextMatcher.isCountdown("广告 3秒后跳过"));
+        assertTrue(TextMatcher.isCountdown("あと 3 秒"));
+        assertTrue(TextMatcher.isCountdown("3초 후 건너뛰기"));
         assertFalse(TextMatcher.isCountdown("跳过"));
         assertTrue(confidence("跳过", "广告来源：趣盟") >= 75);
+    }
+
+    @Test public void normalizesFullWidthAndZeroWidthAdLabels() {
+        assertTrue(TextMatcher.isCountdown("Ｓｋｉｐ ３"));
+        assertTrue(TextMatcher.isCountdown("跳过\u200B 3"));
+        assertTrue(TextMatcher.isExplicitSkipAd("Ｓｋｉｐ Ａｄ"));
+        assertEquals("skip ad", TextMatcher.normalize("Ｓｋｉｐ\u200B Ａｄ"));
     }
 }
