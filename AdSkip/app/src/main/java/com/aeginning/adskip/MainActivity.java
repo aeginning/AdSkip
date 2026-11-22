@@ -165,6 +165,48 @@ public final class MainActivity extends Activity {
 
         addGap(root, 14);
 
+        // Optional floating status panel. It is hosted by the accessibility service,
+        // so no SYSTEM_ALERT_WINDOW permission or separate foreground service is needed.
+        LinearLayout overlayCard = card(root);
+        overlayCard.addView(label("状态悬浮窗", 18, 0xFF172033, true));
+        TextView overlayHint = label(
+                "在其他应用上方显示 AdSkip 运行状态。可拖动顶部移动位置、收起或关闭；无障碍服务停止时悬浮窗会自动消失。无需额外悬浮窗权限。",
+                12, 0xFF7A8495, false);
+        overlayHint.setLineSpacing(dp(3), 1.0f);
+        addGap(overlayCard, 5);
+        overlayCard.addView(overlayHint);
+
+        android.widget.Switch overlayMaster = addOverlayPreferenceSwitch(
+                overlayCard, "启用状态悬浮窗", "floating_overlay_enabled", false);
+        android.widget.Switch overlayShowSkip = addOverlayPreferenceSwitch(
+                overlayCard, "显示广告跳过启用状态", "floating_overlay_show_skip", true);
+        android.widget.Switch overlayShowApps = addOverlayPreferenceSwitch(
+                overlayCard, "显示已启用应用数量", "floating_overlay_show_apps", true);
+        android.widget.Switch overlayShowDns = addOverlayPreferenceSwitch(
+                overlayCard, "显示 DNS 过滤状态", "floating_overlay_show_dns", true);
+        android.widget.Switch overlayShowClicks = addOverlayPreferenceSwitch(
+                overlayCard, "显示近 24 小时自动点击次数", "floating_overlay_show_clicks", true);
+        android.widget.Switch[] overlayOptions = {
+                overlayShowSkip, overlayShowApps, overlayShowDns, overlayShowClicks
+        };
+        Runnable syncOverlayOptions = () -> {
+            boolean enabled = overlayMaster.isChecked();
+            for (android.widget.Switch option : overlayOptions) option.setEnabled(enabled);
+        };
+        syncOverlayOptions.run();
+        overlayMaster.setOnCheckedChangeListener((buttonView, checked) -> {
+            syncOverlayOptions.run();
+            getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                    .putBoolean("floating_overlay_enabled", checked).apply();
+            if (checked && !isAccessibilityServiceEnabled()) {
+                Toast.makeText(this, "已保存悬浮窗设置；开启无障碍服务后才会显示。", Toast.LENGTH_LONG).show();
+            } else if (checked) {
+                Toast.makeText(this, "状态悬浮窗已开启，可在其他应用上方查看。", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        addGap(root, 14);
+
         // App automation and false-positive controls.
         LinearLayout appCard = card(root);
         appCard.addView(label("应用自动化", 18, 0xFF172033, true));
@@ -736,6 +778,8 @@ public final class MainActivity extends Activity {
                         Toast.makeText(this, "保存应用规则失败，原有规则未修改。", Toast.LENGTH_LONG).show();
                         return;
                     }
+                    getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                            .putLong("floating_overlay_refresh_nonce", System.currentTimeMillis()).apply();
                     refreshStatus();
                 })
                 .create();
@@ -1161,6 +1205,25 @@ public final class MainActivity extends Activity {
                 .setNegativeButton("关闭", null)
                 .setNeutralButton("清空日志", (dialog, which) -> database.clearLogs())
                 .show();
+    }
+
+    @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
+    private android.widget.Switch addOverlayPreferenceSwitch(
+            LinearLayout parent, String labelText, String preferenceKey, boolean defaultValue) {
+        android.widget.Switch option = new android.widget.Switch(this);
+        option.setText(labelText);
+        option.setTextSize(14);
+        option.setTextColor(0xFF344054);
+        option.setPadding(0, dp(6), 0, dp(6));
+        option.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean(preferenceKey, defaultValue));
+        parent.addView(option, new LinearLayout.LayoutParams(-1, -2));
+        if (!"floating_overlay_enabled".equals(preferenceKey)) {
+            option.setOnCheckedChangeListener((buttonView, checked) ->
+                    getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                            .putBoolean(preferenceKey, checked).apply());
+        }
+        return option;
     }
 
     private LinearLayout card(LinearLayout parent) {
