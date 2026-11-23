@@ -536,7 +536,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 if (!SafetyPolicy.isSafeTarget(bounds, width, height,
                         clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
                         label, context, isCountdownClickEnabled(), minimumScore,
-                        customSkipWords, topRightSkipFallback)) {
+                        customSkipWords, topRightSkipFallback, assessment)) {
                     unsafe++;
                     String reason = "目标未通过最终安全区域或高风险操作策略";
                     rejectionReasons.put(reason, rejectionReasons.getOrDefault(reason, 0) + 1);
@@ -1831,7 +1831,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (assessment.score < minimumScore || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                 true, true, true, candidate.label, context,
                 isCountdownClickEnabled(), minimumScore, customSkipWords,
-                candidate.requiresSecondConfirmation)) {
+                candidate.requiresSecondConfirmation, assessment)) {
             database.log(expectedPackage, safeLogLabel(candidate.label), "BLOCKED",
                     "OCR 候选未通过置信度门槛或最终安全审核；未执行点击");
             logDiagnostic(expectedPackage, "OCR_BLOCKED",
@@ -2073,7 +2073,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                                             true, true, true, observedLabel, context,
                                             isCountdownClickEnabled(), getMinimumSkipScore(),
-                                            customSkipWords, isExtremeSkipMode())) {
+                                            customSkipWords, isExtremeSkipMode(), second)) {
                                 logDiagnostic(expectedPackage, "OCR_CONFIRM_BLOCKED",
                                         "二次 OCR 文字位置匹配，但置信度或最终安全策略未通过");
                                 continue;
