@@ -129,9 +129,10 @@ final class FloatingStatusOverlay {
 
         String skipStatus = !serviceAvailable ? "未运行"
                 : enabledApps > 0 ? "已启用" : "等待选择应用";
+        boolean riskMode = preferences.getBoolean("risk_mode_enabled", false);
         if (serviceAvailable && enabledApps > 0
-                && preferences.getBoolean("extreme_skip_mode", false)) {
-            skipStatus += " · 极速模式";
+                && (preferences.getBoolean("extreme_skip_mode", false) || riskMode)) {
+            skipStatus += riskMode ? " · 风险模式" : " · 极速模式";
         }
         String dnsStatus = DnsFilterVpnService.isRunning() ? "运行中" : "未运行";
         String ocrStatus = preferences.getBoolean("ocr_enabled", true) ? "已启用" : "未启用";
