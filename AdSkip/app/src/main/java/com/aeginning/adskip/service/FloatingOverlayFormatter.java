@@ -15,6 +15,24 @@ final class FloatingOverlayFormatter {
             boolean showDnsBlocks, int dnsBlocks24h,
             boolean showNoAction, int noAction24h,
             boolean showErrors, int errors24h) {
+        return format(showSkip, skipStatus, showApps, enabledApps, showDns, dnsStatus,
+                showClicks, clicks24h, showOcr, ocrStatus, showDnsRules, dnsRules,
+                showSafetyBlocks, safetyBlocks24h, showDnsBlocks, dnsBlocks24h,
+                showNoAction, noAction24h, showErrors, errors24h, false, "");
+    }
+
+    static String format(
+            boolean showSkip, String skipStatus,
+            boolean showApps, int enabledApps,
+            boolean showDns, String dnsStatus,
+            boolean showClicks, int clicks24h,
+            boolean showOcr, String ocrStatus,
+            boolean showDnsRules, int dnsRules,
+            boolean showSafetyBlocks, int safetyBlocks24h,
+            boolean showDnsBlocks, int dnsBlocks24h,
+            boolean showNoAction, int noAction24h,
+            boolean showErrors, int errors24h,
+            boolean showRecognitionState, String recognitionState) {
         StringBuilder text = new StringBuilder();
 
         // Keep the original four rows first and unchanged for existing users.
@@ -29,6 +47,7 @@ final class FloatingOverlayFormatter {
         if (showDnsBlocks) appendLine(text, "近 24 小时 DNS 拦截", dnsBlocks24h + " 次");
         if (showNoAction) appendLine(text, "近 24 小时未执行", noAction24h + " 次");
         if (showErrors) appendLine(text, "近 24 小时错误", errors24h + " 次");
+        if (showRecognitionState) appendLine(text, "当前识别状态", recognitionState);
 
         if (text.length() == 0) return "已开启悬浮窗 · 暂无显示项目";
         return text.toString();
