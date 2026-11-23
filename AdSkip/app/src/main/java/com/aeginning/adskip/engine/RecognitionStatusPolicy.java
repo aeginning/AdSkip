@@ -13,7 +13,7 @@ public final class RecognitionStatusPolicy {
             case "OCR_QUEUED":
             case "OCR_QUEUE_REPLACED":
             case "OCR_QUEUE_WAIT": return "识别任务排队";
-            case "OCR_SUCCESS":
+            case "OCR_SUCCESS": return "正在分析识别结果";
             case "CANDIDATE":
             case "SPLASH_PROBE_CANDIDATE":
             case "COUNTDOWN_READY": return "识别成功 · 安全复核中";
