@@ -369,7 +369,9 @@ public final class MainActivity extends Activity {
         extremeModeSwitch.setTextColor(0xFF344054);
         extremeModeSwitch.setPadding(0, dp(8), 0, dp(4));
         extremeModeSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
-                .getBoolean("extreme_skip_mode", false));
+                .getBoolean("extreme_skip_mode", false)
+                || getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("risk_mode_enabled", false));
         extremeModeSwitch.setContentDescription(
                 "极速识别模式：提高扫描频率并降低候选门槛，但保留应用白名单、窗口校验和风险操作保护");
         extremeModeSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
