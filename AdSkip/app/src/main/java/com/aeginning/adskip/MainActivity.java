@@ -54,6 +54,8 @@ import com.aeginning.adskip.privilege.IAdSkipShellService;
 public final class MainActivity extends Activity {
     private static final int REQUEST_VPN = 410;
     private static final int REQUEST_NOTIFICATIONS = 411;
+    private static final int REQUEST_SUCCESS_NOTIFICATION_PERMISSION = 412;
+    private android.widget.Switch successNotificationSwitch;
     private RuleDatabase database;
     private TextView serviceStatus;
     private TextView appRuleStatus;
@@ -175,6 +177,30 @@ public final class MainActivity extends Activity {
         TextView statusHint = label("无障碍负责识别明确的跳过按钮；DNS 过滤需要单独启动并获得 VPN 授权。", 12, 0xFF7A8495, false);
         addGap(statusCard, 9);
         statusCard.addView(statusHint);
+
+        addGap(statusCard, 8);
+        successNotificationSwitch = new android.widget.Switch(this);
+        successNotificationSwitch.setText("拦截成功后发送通知");
+        successNotificationSwitch.setTextSize(14);
+        successNotificationSwitch.setTextColor(0xFF344054);
+        successNotificationSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("interception_success_notifications_enabled", true));
+        successNotificationSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
+            getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                    .putBoolean("interception_success_notifications_enabled", checked).apply();
+            if (checked && Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        REQUEST_SUCCESS_NOTIFICATION_PERMISSION);
+            }
+        });
+        statusCard.addView(successNotificationSwitch);
+        TextView notificationHint = label(
+                "广告跳过经页面变化验证成功、或 DNS 拦截响应成功后提醒。两类通知各自更新，不会因高频 DNS 请求堆满通知栏；Android 13 及以上需要允许通知权限。",
+                11, 0xFF7A8495, false);
+        addGap(statusCard, 3);
+        statusCard.addView(notificationHint);
 
         addGap(root, 14);
 
@@ -1303,6 +1329,20 @@ public final class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_SUCCESS_NOTIFICATION_PERMISSION) {
+            boolean granted = grantResults.length > 0
+                    && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            if (!granted) {
+                getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putBoolean("interception_success_notifications_enabled", false).apply();
+                if (successNotificationSwitch != null) successNotificationSwitch.setChecked(false);
+                Toast.makeText(this, "未授予通知权限，拦截通知已关闭；广告识别和 DNS 拦截不受影响。",
+                        Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "拦截成功通知已启用。", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
         if (requestCode != REQUEST_NOTIFICATIONS) return;
         if (grantResults.length == 0 || grantResults[0] != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "通知权限未授予；VPN 前台服务仍会由系统显示运行状态。", Toast.LENGTH_LONG).show();
