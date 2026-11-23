@@ -219,7 +219,7 @@ public final class MainActivity extends Activity {
         });
         statusCard.addView(successNotificationSwitch);
         TextView notificationHint = label(
-                "广告跳过经页面变化验证成功、或 DNS 拦截响应成功后提醒。两类通知各自更新，不会因高频 DNS 请求堆满通知栏；Android 13 及以上需要允许通知权限。",
+                "广告跳过经原应用窗口验证成功、或 DNS 拦截响应成功后提醒。两类通知各自更新，不会因高频 DNS 请求堆满通知栏；Android 13 及以上需要允许通知权限。",
                 11, 0xFF7A8495, false);
         addGap(statusCard, 3);
         statusCard.addView(notificationHint);
@@ -741,7 +741,7 @@ public final class MainActivity extends Activity {
     private void showChangelogDialog() {
         String changelog =
                 "AdSkip " + getAppVersionName() + " · 拦截成功通知与 DNS 响应确认\n\n"
-                + "• 新增广告跳过成功通知：只有点击后页面验证确认广告候选消失或前台页面已离开才通知；仅派发点击请求、验证未知或点击无效均不通知。\n"
+                + "• 新增广告跳过成功通知：只有点击后在原应用窗口验证确认广告候选消失或页面发生变化才通知；仅派发点击请求、验证未知或点击无效均不通知。\n"
                 + "• 新增 DNS 拦截成功通知：只有 NXDOMAIN 拦截响应成功写入本地 VPN 通道后才通知。\n"
                 + "• 通知总开关默认开启；Android 13 及以上首次使用时请求通知权限。广告跳过与 DNS 两类通知分别更新并显示累计次数，避免高频 DNS 请求堆满通知栏。\n"
                 + "• 通知权限被拒绝或用户关闭总开关时，不影响广告识别与 DNS 拦截。\n\n"
