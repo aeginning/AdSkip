@@ -1254,9 +1254,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             CharSequence rootPackage = root.getPackageName();
             if (rootPackage == null || !packageName.contentEquals(rootPackage)) {
                 recycleNode(root);
-                logDiagnostic(packageName, "CLICK_VERIFIED",
-                        source + "点击后前台应用已切换，原广告页面已离开");
-                SuccessNotificationManager.notifyAdSkip(this, packageName);
+                logDiagnostic(packageName, "CLICK_VERIFY_UNKNOWN",
+                        source + "点击后前台应用已切换，无法确认广告是否由本次点击关闭；不发送成功通知");
                 return;
             }
 
