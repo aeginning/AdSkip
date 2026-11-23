@@ -1081,10 +1081,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private void handlePrivilegedForegroundPackage(String packageName) {
-        if (packageName == null || packageName.trim().isEmpty()
-                || packageName.equals(getPackageName())) return;
+        if (packageName == null || packageName.trim().isEmpty()) return;
         if (packageName.equals(lastPrivilegedForegroundPackage)) return;
-        if (database == null || !database.isAppEnabled(packageName)) return;
+        if (packageName.equals(getPackageName()) || database == null
+                || !database.isAppEnabled(packageName)) {
+            // Remember non-target foreground packages so returning to an enabled app
+            // is treated as a fresh launch and gets an immediate probe.
+            lastPrivilegedForegroundPackage = packageName;
+            return;
+        }
         AccessibilityNodeInfo root = null;
         try {
             root = getRootInActiveWindow();
