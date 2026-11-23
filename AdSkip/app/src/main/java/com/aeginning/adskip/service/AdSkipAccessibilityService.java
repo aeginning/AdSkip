@@ -28,6 +28,8 @@ import com.aeginning.adskip.engine.SplashProbePolicy;
 import com.aeginning.adskip.engine.ExtremeSkipPolicy;
 import com.aeginning.adskip.engine.SkipWordLibrary;
 import com.aeginning.adskip.engine.SkipLayoutPolicy;
+import com.aeginning.adskip.engine.LatestWinsQueue;
+import com.aeginning.adskip.engine.WindowSessionPolicy;
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions;
@@ -41,6 +43,8 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -52,11 +56,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private static final long CLICK_COOLDOWN_MS = 2_200L;
     private static final long CLICK_VERIFY_DELAY_MS = 750L;
     private static final int OCR_MAX_DIMENSION = 1280;
-    private static final int MAX_NODES = 650;
-    private static final int MAX_DEPTH = 14;
+    private static final int MAX_NODES = 900;
+    private static final int MAX_DEPTH = 18;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService screenshotExecutor = Executors.newSingleThreadExecutor();
+    private final Object ocrStateLock = new Object();
+    private final LatestWinsQueue<PendingOcrRequest> pendingOcrRequests = new LatestWinsQueue<>();
     private RuleDatabase database;
     private FloatingStatusOverlay floatingStatusOverlay;
     private SharedPreferences overlayPreferences;
@@ -72,12 +78,20 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private long lastClickAt;
     private long lastOcrAt;
     private volatile boolean ocrInFlight;
+    private volatile long ocrStartedAt;
+    private volatile String activeOcrPackage = "";
     private volatile boolean hasSensitiveInputInCurrentWindow;
     private final List<Rect> sensitiveInputBounds = new ArrayList<>();
     private boolean sensitiveInputBoundsUnknown;
     private volatile long windowGeneration;
     private volatile boolean destroyed;
+    private String activeWindowPackage;
+    private String activeWindowClass;
+    private int activeWindowId = -1;
     private boolean nodeScanIncomplete;
+    private int nodeScanCount;
+    private int nodeScanMaxDepth;
+    private String nodeScanIncompleteReason = "";
     private String pendingNodeSignature;
     private Runnable pendingNodeConfirmation;
     private Runnable pendingCountdownRescan;
@@ -126,13 +140,6 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
         String previousSplashProbePackage = splashProbePackage;
         int previousSplashProbeAttempts = splashProbeAttempts;
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-            windowGeneration++;
-            cancelPendingNodeConfirmation();
-            cancelPendingCountdownRescan();
-            cancelPendingSplashProbe();
-        }
 
         CharSequence packageName = event.getPackageName();
         AccessibilityNodeInfo fallbackRoot = null;
@@ -160,6 +167,33 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
             logDiagnostic("", "PACKAGE_FROM_ACTIVE_ROOT",
                     "事件未提供包名，已从当前活动无障碍窗口安全恢复目标；仍需通过应用启用状态和窗口一致性检查");
+        }
+
+        boolean windowIdentityEvent = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED;
+        if (windowIdentityEvent) {
+            int eventWindowId = event.getWindowId();
+            CharSequence classNameValue = event.getClassName();
+            String eventClass = classNameValue == null ? "" : classNameValue.toString().trim();
+            boolean sessionChanged = WindowSessionPolicy.isNewSession(
+                    activeWindowPackage, pkg, activeWindowClass, eventClass,
+                    activeWindowId, eventWindowId,
+                    type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED);
+            if (sessionChanged) {
+                windowGeneration++;
+                cancelPendingNodeConfirmation();
+                cancelPendingCountdownRescan();
+                cancelPendingSplashProbe();
+            }
+            activeWindowPackage = pkg;
+            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !eventClass.isEmpty()) {
+                activeWindowClass = eventClass;
+            }
+            if (eventWindowId >= 0) activeWindowId = eventWindowId;
+            if (sessionChanged) {
+                logDiagnostic(pkg, "WINDOW_SESSION_CHANGED",
+                        "检测到应用包名、窗口 ID 或 Activity 类变化；已使旧窗口候选失效");
+            }
         }
 
         boolean newForegroundApp = false;
@@ -226,7 +260,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         hasSensitiveInputInCurrentWindow = false;
         sensitiveInputBounds.clear();
         sensitiveInputBoundsUnknown = false;
-        nodeScanIncomplete = false;
+        resetNodeScanState();
         if (root == null) {
             logDiagnostic(pkg, "NO_WINDOW", "Android 未提供活动窗口节点；可能是安全窗口、切换动画或应用限制");
             return;
@@ -250,7 +284,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
             if (nodeScanIncomplete) {
                 logDiagnostic(pkg, "SCAN_INCOMPLETE",
-                        "控件树超过安全扫描预算或节点遍历不完整；为避免遗漏风险上下文，本次不点击");
+                        "控件树超过安全扫描预算或节点遍历不完整；为避免遗漏风险上下文，本次不点击；" + nodeScanStatus());
                 return;
             }
 
@@ -284,16 +318,23 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private void collectNodes(AccessibilityNodeInfo node, int depth,
                               List<AccessibilityNodeInfo> nodes, StringBuilder text) {
         if (node == null) return;
+        nodeScanMaxDepth = Math.max(nodeScanMaxDepth, depth);
         if (!node.isVisibleToUser()) {
             recycleNode(node);
             return;
         }
-        if (depth > MAX_DEPTH || nodes.size() >= MAX_NODES) {
-            nodeScanIncomplete = true;
+        if (depth > MAX_DEPTH) {
+            markNodeScanIncomplete("树深度超过 " + MAX_DEPTH);
+            recycleNode(node);
+            return;
+        }
+        if (nodes.size() >= MAX_NODES) {
+            markNodeScanIncomplete("可见节点超过 " + MAX_NODES);
             recycleNode(node);
             return;
         }
         nodes.add(node);
+        nodeScanCount++;
         boolean password = node.isPassword();
         boolean editable = node.isEditable();
         boolean sensitive = SensitiveInputPolicy.isSensitive(password, editable,
@@ -321,14 +362,74 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 text.append(description, 0, Math.min(description.length(), 16000 - text.length())).append(' ');
             }
         }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            if (nodes.size() >= MAX_NODES) {
-                nodeScanIncomplete = true;
-                break;
+        List<AccessibilityNodeInfo> children = new ArrayList<>();
+        try {
+            int childCount = node.getChildCount();
+            if (childCount > MAX_NODES) {
+                markNodeScanIncomplete("单个节点的子节点数超过 " + MAX_NODES);
+                childCount = MAX_NODES;
             }
-            AccessibilityNodeInfo child = node.getChild(i);
-            if (child != null) collectNodes(child, depth + 1, nodes, text);
+            for (int i = 0; i < childCount; i++) {
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) children.add(child);
+            }
+            // Traverse likely skip controls first (explicit labels, then generic skip
+            // labels/close glyphs, clickable controls, and finally top-right controls).
+            // This changes discovery order only; the complete-tree and safety checks remain.
+            children.sort((left, right) -> Integer.compare(scanPriority(right), scanPriority(left)));
+            for (int i = 0; i < children.size(); i++) {
+                AccessibilityNodeInfo child = children.set(i, null);
+                if (child != null) collectNodes(child, depth + 1, nodes, text);
+            }
+        } finally {
+            for (AccessibilityNodeInfo child : children) {
+                if (child != null) recycleNode(child);
+            }
         }
+    }
+
+    private int scanPriority(AccessibilityNodeInfo node) {
+        if (node == null || !node.isVisibleToUser()) return -100;
+        int score = 0;
+        if (!node.isPassword() && !node.isEditable()) {
+            CharSequence text = node.getText();
+            CharSequence description = node.getContentDescription();
+            String first = text == null ? "" : text.toString().trim();
+            String second = description == null ? "" : description.toString().trim();
+            if (TextMatcher.isExplicitSkipAd(first) || TextMatcher.isExplicitCloseAd(first)
+                    || TextMatcher.isExplicitSkipAd(second) || TextMatcher.isExplicitCloseAd(second)) {
+                score += 160;
+            } else if (TextMatcher.isCloseGlyph(first) || TextMatcher.isCloseGlyph(second)) {
+                score += 130;
+            } else if (TextMatcher.isGenericSkipLabel(first) || TextMatcher.isGenericSkipLabel(second)) {
+                score += 120;
+            }
+        }
+        if (node.isClickable() && node.isEnabled()) score += 35;
+        Rect bounds = new Rect();
+        node.getBoundsInScreen(bounds);
+        int width = getResources().getDisplayMetrics().widthPixels;
+        int height = getResources().getDisplayMetrics().heightPixels;
+        if (!bounds.isEmpty() && height > 0 && bounds.top <= height * 0.42f) score += 18;
+        if (!bounds.isEmpty() && width > 0 && bounds.right >= width * 0.58f) score += 16;
+        return score;
+    }
+
+    private void resetNodeScanState() {
+        nodeScanIncomplete = false;
+        nodeScanCount = 0;
+        nodeScanMaxDepth = 0;
+        nodeScanIncompleteReason = "";
+    }
+
+    private void markNodeScanIncomplete(String reason) {
+        nodeScanIncomplete = true;
+        if (nodeScanIncompleteReason.isEmpty()) nodeScanIncompleteReason = reason;
+    }
+
+    private String nodeScanStatus() {
+        return "已访问 " + nodeScanCount + " 个可见节点，最大深度 " + nodeScanMaxDepth
+                + "；截断原因：" + (nodeScanIncompleteReason.isEmpty() ? "未知" : nodeScanIncompleteReason);
     }
 
     @SuppressWarnings("deprecation")
@@ -353,6 +454,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         int unsafe = 0;
         int sensitiveRegionRejected = 0;
         String firstRejection = "";
+        Map<String, Integer> rejectionReasons = new LinkedHashMap<>();
         List<String> suppressedLabels = database == null
                 ? java.util.Collections.emptyList() : database.getSuppressedLabels(packageName);
         List<String> customSkipWords = getCustomSkipWords();
@@ -393,7 +495,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 int score = assessment.score;
                 if (score <= bestScore || score < minimumScore) {
                     lowConfidence++;
-                    if (firstRejection.isEmpty()) firstRejection = assessment.reason;
+                    String reason = assessment.reason == null ? "未提供拒绝原因" : assessment.reason;
+                    rejectionReasons.put(reason, rejectionReasons.getOrDefault(reason, 0) + 1);
+                    if (firstRejection.isEmpty()) firstRejection = reason;
                     continue;
                 }
                 if (!SafetyPolicy.isSafeTarget(bounds, width, height,
@@ -401,7 +505,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         label, context, isCountdownClickEnabled(), minimumScore,
                         customSkipWords, topRightSkipFallback)) {
                     unsafe++;
-                    if (firstRejection.isEmpty()) firstRejection = "目标未通过最终安全区域或高风险操作策略";
+                    String reason = "目标未通过最终安全区域或高风险操作策略";
+                    rejectionReasons.put(reason, rejectionReasons.getOrDefault(reason, 0) + 1);
+                    if (firstRejection.isEmpty()) firstRejection = reason;
                     continue;
                 }
 
@@ -420,11 +526,26 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     + "，无可点击父控件 " + noClickableAncestor + "，用户屏蔽 " + suppressed
                     + "，置信度不足 " + lowConfidence + "，敏感区域排除 " + sensitiveRegionRejected
                     + "，安全策略拒绝 " + unsafe
-                    + (firstRejection.isEmpty() ? "；未发现明确的广告跳过/关闭控件" : "；首个拒绝原因：" + firstRejection);
+                    + (firstRejection.isEmpty() ? "；未发现明确的广告跳过/关闭控件" : "；首个拒绝原因：" + firstRejection)
+                    + formatRejectionReasons(rejectionReasons);
         } else {
             lastCandidateDecisionReason = "发现候选控件，置信度=" + bestScore;
         }
         return best;
+    }
+
+    private String formatRejectionReasons(Map<String, Integer> reasons) {
+        if (reasons == null || reasons.isEmpty()) return "";
+        List<Map.Entry<String, Integer>> ranked = new ArrayList<>(reasons.entrySet());
+        ranked.sort((left, right) -> Integer.compare(right.getValue(), left.getValue()));
+        StringBuilder summary = new StringBuilder("；拒绝原因统计：");
+        int count = Math.min(3, ranked.size());
+        for (int i = 0; i < count; i++) {
+            if (i > 0) summary.append("、");
+            Map.Entry<String, Integer> entry = ranked.get(i);
+            summary.append(entry.getKey()).append(" ×").append(entry.getValue());
+        }
+        return summary.toString();
     }
 
     private boolean isSuppressedLabel(List<String> phrases, String candidate) {
@@ -474,7 +595,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             hasSensitiveInputInCurrentWindow = false;
             sensitiveInputBounds.clear();
             sensitiveInputBoundsUnknown = false;
-            nodeScanIncomplete = false;
+            resetNodeScanState();
             List<AccessibilityNodeInfo> nodes = new ArrayList<>();
             Candidate second = null;
             try {
@@ -486,7 +607,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 }
                 if (nodeScanIncomplete) {
                     logDiagnostic(packageName, "CONFIRM_SCAN_INCOMPLETE",
-                            "二次确认控件树不完整，已取消点击");
+                            "二次确认控件树不完整，已取消点击；" + nodeScanStatus());
                     return;
                 }
                 String secondContext = text.toString();
@@ -546,6 +667,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if ("SCAN".equals(action)) interval = 4_000L;
         else if ("SCAN_THROTTLED".equals(action)) interval = 5_000L;
         else if ("APP_NOT_ENABLED".equals(action)) interval = 30_000L;
+        else if ("OCR_DURATION".equals(action) || "OCR_MODEL_DURATION".equals(action)
+                || "OCR_CAPTURE_LATENCY".equals(action) || "OCR_PREPROCESS_DURATION".equals(action)) interval = 0L;
         else interval = 1_200L;
         if (!diagnosticThrottle.shouldLog(safePackage + "|" + action,
                 SystemClock.elapsedRealtime(), interval)) return;
@@ -623,7 +746,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             hasSensitiveInputInCurrentWindow = false;
             sensitiveInputBounds.clear();
             sensitiveInputBoundsUnknown = false;
-            nodeScanIncomplete = false;
+            resetNodeScanState();
             List<AccessibilityNodeInfo> nodes = new ArrayList<>();
             Candidate candidate = null;
             try {
@@ -635,7 +758,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 }
                 if (nodeScanIncomplete) {
                     logDiagnostic(packageName, "COUNTDOWN_SCAN_INCOMPLETE",
-                            "倒计时主动扫描的控件树不完整，本轮不点击");
+                            "倒计时主动扫描的控件树不完整，本轮不点击；" + nodeScanStatus());
                     scheduleCountdownRescan(packageName, generation);
                     return;
                 }
@@ -742,7 +865,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             hasSensitiveInputInCurrentWindow = false;
             sensitiveInputBounds.clear();
             sensitiveInputBoundsUnknown = false;
-            nodeScanIncomplete = false;
+            resetNodeScanState();
             List<AccessibilityNodeInfo> nodes = new ArrayList<>();
             Candidate candidate = null;
             try {
@@ -750,7 +873,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 collectNodes(root, 0, nodes, text);
                 if (nodeScanIncomplete) {
                     logDiagnostic(packageName, "SPLASH_PROBE_INCOMPLETE",
-                            "开屏主动探测的控件树不完整，本轮不执行点击或截图");
+                            "开屏主动探测的控件树不完整，本轮不执行点击或截图；" + nodeScanStatus());
                 } else {
                     String context = text.toString();
                     if (TextMatcher.isCountdown(context)) {
@@ -935,7 +1058,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             hasSensitiveInputInCurrentWindow = false;
             sensitiveInputBounds.clear();
             sensitiveInputBoundsUnknown = false;
-            nodeScanIncomplete = false;
+            resetNodeScanState();
             List<AccessibilityNodeInfo> nodes = new ArrayList<>();
             try {
                 StringBuilder text = new StringBuilder();
@@ -993,10 +1116,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe,
                              long generation, String treeContext, boolean splashProbe) {
-        if (ocrInFlight) {
-            logDiagnostic(expectedPackage, "OCR_BUSY", "上一轮 OCR 尚未完成，本次截图请求已合并");
-            return;
-        }
+        if (destroyed || expectedPackage == null || expectedPackage.trim().isEmpty()) return;
         if (hasSensitiveInputInCurrentWindow) {
             logDiagnostic(expectedPackage, "OCR_BLOCKED_SENSITIVE",
                     "当前窗口存在敏感输入区域，已禁止截图 OCR");
@@ -1019,44 +1139,144 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             logDiagnostic(expectedPackage, "OCR_THROTTLED", "OCR 截图间隔未达到限制，已节流");
             return;
         }
+        if (!tryBeginOcrWork(expectedPackage)) {
+            queueOcrRequest(expectedPackage, adContext, allowVisualProbe, generation, treeContext, splashProbe);
+            return;
+        }
         lastOcrAt = now;
-        ocrInFlight = true;
+        final long screenshotRequestedAt = SystemClock.elapsedRealtime();
         logDiagnostic(expectedPackage, "OCR_START",
-                "开始本地多语言 OCR；优先语言由系统语言和控件树字符特征决定");
+                "开始本地多语言 OCR；优先语言由系统语言和控件树字符特征决定；排队等待时间由 OCR_QUEUE_WAIT 单独记录");
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, new TakeScreenshotCallback() {
                 @Override public void onSuccess(ScreenshotResult result) {
                     Bitmap bitmap = null;
+                    long captureCallbackAt = SystemClock.elapsedRealtime();
+                    logDiagnostic(expectedPackage, "OCR_CAPTURE_LATENCY",
+                            "Android 截图回调耗时 " + Math.max(0L, captureCallbackAt - screenshotRequestedAt)
+                                    + " ms");
+                    long preprocessStartedAt = captureCallbackAt;
                     try {
                         bitmap = copyScreenshotBitmap(result);
                         if (bitmap == null) {
                             logDiagnostic(expectedPackage, "OCR_ERROR", "系统截图结果为空或无法转换为软件位图");
-                            ocrInFlight = false;
+                            finishOcrWork();
                             return;
                         }
                         Bitmap bounded = resizeForOcr(bitmap);
                         if (bounded != bitmap && !bitmap.isRecycled()) bitmap.recycle();
+                        logDiagnostic(expectedPackage, "OCR_PREPROCESS_DURATION",
+                                "截图复制与缩放耗时 "
+                                        + Math.max(0L, SystemClock.elapsedRealtime() - preprocessStartedAt) + " ms");
                         runRecognizers(bounded, expectedPackage, generation, treeContext);
                         bitmap = null;
                     } catch (Throwable failure) {
                         if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
                         logDiagnostic(expectedPackage, "OCR_ERROR",
                                 "截图预处理失败：" + failure.getClass().getSimpleName());
-                        ocrInFlight = false;
+                        finishOcrWork();
                     }
                 }
 
                 @Override public void onFailure(int errorCode) {
+                    logDiagnostic(expectedPackage, "OCR_CAPTURE_LATENCY",
+                            "Android 截图失败回调耗时 "
+                                    + Math.max(0L, SystemClock.elapsedRealtime() - screenshotRequestedAt) + " ms");
                     logDiagnostic(expectedPackage, "OCR_ERROR", "Android 截图 API 返回错误码 " + errorCode
                             + "；可能受安全窗口、系统权限或厂商 ROM 限制");
-                    ocrInFlight = false;
+                    finishOcrWork();
                 }
             });
         } catch (Throwable failure) {
             logDiagnostic(expectedPackage, "OCR_ERROR",
                     "调用截图 API 异常：" + failure.getClass().getSimpleName());
-            ocrInFlight = false;
+            finishOcrWork();
         }
+    }
+
+    private void queueOcrRequest(String expectedPackage, boolean adContext, boolean allowVisualProbe,
+                                 long generation, String treeContext, boolean splashProbe) {
+        PendingOcrRequest previous = pendingOcrRequests.poll();
+        PendingOcrRequest latest = new PendingOcrRequest(expectedPackage, adContext, allowVisualProbe,
+                generation, treeContext == null ? "" : treeContext, splashProbe,
+                SystemClock.elapsedRealtime());
+        if (previous != null && previous.expectedPackage.equals(expectedPackage)
+                && previous.generation == generation) {
+            latest.adContext |= previous.adContext;
+            latest.allowVisualProbe |= previous.allowVisualProbe;
+            latest.splashProbe |= previous.splashProbe;
+            if (latest.treeContext.isEmpty()) latest.treeContext = previous.treeContext;
+        }
+        pendingOcrRequests.offer(latest);
+        logDiagnostic(expectedPackage, previous == null ? "OCR_QUEUED" : "OCR_QUEUE_REPLACED",
+                previous == null
+                        ? "当前 OCR 正在运行；已保留本次最新识别请求，等待当前任务结束"
+                        : "当前 OCR 正在运行；已用最新窗口观察替换旧待处理请求，避免任务积压");
+    }
+
+    private boolean tryBeginOcrWork(String packageName) {
+        synchronized (ocrStateLock) {
+            if (ocrInFlight) return false;
+            ocrInFlight = true;
+            ocrStartedAt = SystemClock.elapsedRealtime();
+            activeOcrPackage = packageName == null ? "" : packageName;
+            return true;
+        }
+    }
+
+    private void finishOcrWork() {
+        long startedAt;
+        String packageName;
+        synchronized (ocrStateLock) {
+            if (!ocrInFlight && ocrStartedAt <= 0L) return;
+            startedAt = ocrStartedAt;
+            packageName = activeOcrPackage;
+            ocrInFlight = false;
+            ocrStartedAt = 0L;
+            activeOcrPackage = "";
+        }
+        if (startedAt > 0L) {
+            long elapsed = Math.max(0L, SystemClock.elapsedRealtime() - startedAt);
+            logDiagnostic(packageName, "OCR_DURATION",
+                    "本轮截图及识别/确认处理耗时 " + elapsed + " ms；仅记录耗时，不记录屏幕文字");
+        }
+        if (destroyed) {
+            pendingOcrRequests.clear();
+            return;
+        }
+        mainHandler.post(this::dispatchPendingOcrRequest);
+    }
+
+    private void dispatchPendingOcrRequest() {
+        if (destroyed || database == null || ocrInFlight) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            PendingOcrRequest unsupported = pendingOcrRequests.poll();
+            if (unsupported != null) {
+                logDiagnostic(unsupported.expectedPackage, "OCR_UNAVAILABLE",
+                        "当前 Android 版本不支持截图 OCR；待处理请求已结束，保留控件树识别");
+            }
+            return;
+        }
+        PendingOcrRequest pending = pendingOcrRequests.poll();
+        if (pending == null) return;
+        if (pending.generation != windowGeneration) {
+            logDiagnostic(pending.expectedPackage, "OCR_QUEUE_STALE",
+                    "待处理 OCR 请求所属窗口会话已变化；已丢弃，不会使用旧截图或旧候选");
+            return;
+        }
+        if (!database.isAppEnabled(pending.expectedPackage)) {
+            logDiagnostic(pending.expectedPackage, "OCR_QUEUE_APP_DISABLED",
+                    "待处理 OCR 请求执行前发现目标应用已关闭自动化；已丢弃");
+            return;
+        }
+        long waited = Math.max(0L, SystemClock.elapsedRealtime() - pending.queuedAt);
+        logDiagnostic(pending.expectedPackage, "OCR_QUEUE_WAIT",
+                "最新 OCR 请求等待 " + waited + " ms 后开始；队列容量固定为 1");
+        // This request has already passed the trigger cadence before it was queued.
+        // Do not throttle it a second time merely because the previous OCR just ended.
+        lastOcrAt = 0L;
+        maybeRunOcr(pending.expectedPackage, pending.adContext, pending.allowVisualProbe,
+                pending.generation, pending.treeContext, pending.splashProbe);
     }
 
     private List<TextRecognizer> getRecognizerOrder(String visibleText) {
@@ -1131,7 +1351,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         List<TextRecognizer> recognizers = getRecognizerOrder(treeContext);
         if (recognizers.isEmpty()) {
             if (!bitmap.isRecycled()) bitmap.recycle();
-            ocrInFlight = false;
+            finishOcrWork();
             logDiagnostic(expectedPackage, "OCR_ERROR", "没有可用的本地 OCR 识别模型");
             return;
         }
@@ -1142,24 +1362,28 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             List<TextRecognizer> recognizers, int recognizerIndex) {
         if (destroyed || bitmap == null || bitmap.isRecycled()) {
             if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
-            ocrInFlight = false;
+            finishOcrWork();
             return;
         }
         if (recognizerIndex >= recognizers.size()) {
             if (!bitmap.isRecycled()) bitmap.recycle();
-            ocrInFlight = false;
+            finishOcrWork();
             logDiagnostic(expectedPackage, "OCR_NO_CANDIDATE",
                     "已按优先顺序尝试全部可用语言模型，仍未发现明确且安全的跳过/关闭控件");
             return;
         }
 
         TextRecognizer recognizer = recognizers.get(recognizerIndex);
+        final long modelStartedAt = SystemClock.elapsedRealtime();
         final int sourceWidth = bitmap.getWidth();
         final int sourceHeight = bitmap.getHeight();
         try {
             InputImage image = InputImage.fromBitmap(bitmap, 0);
             Task<Text> task = recognizer.process(image);
             task.addOnCompleteListener(completed -> {
+                logDiagnostic(expectedPackage, "OCR_MODEL_DURATION",
+                        recognizerName(recognizer) + "模型耗时 "
+                                + Math.max(0L, SystemClock.elapsedRealtime() - modelStartedAt) + " ms");
                 boolean handedToFallback = false;
                 try {
                     if (destroyed) return;
@@ -1267,18 +1491,21 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 } finally {
                     if (!handedToFallback) {
                         if (!bitmap.isRecycled()) bitmap.recycle();
-                        ocrInFlight = false;
+                        finishOcrWork();
                     }
                 }
             });
         } catch (Throwable failure) {
+            logDiagnostic(expectedPackage, "OCR_MODEL_DURATION",
+                    recognizerName(recognizer) + "模型调用异常，耗时 "
+                            + Math.max(0L, SystemClock.elapsedRealtime() - modelStartedAt) + " ms");
             logDiagnostic(expectedPackage, "OCR_MODEL_ERROR",
                     recognizerName(recognizer) + "模型调用异常：" + failure.getClass().getSimpleName());
             if (recognizerIndex + 1 < recognizers.size()) {
                 runOcrPass(bitmap, expectedPackage, generation, recognizers, recognizerIndex + 1);
             } else {
                 if (!bitmap.isRecycled()) bitmap.recycle();
-                ocrInFlight = false;
+                finishOcrWork();
                 logDiagnostic(expectedPackage, "OCR_ERROR", "所有语言模型均无法处理当前截图");
             }
         }
@@ -1454,37 +1681,36 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void confirmOcrCandidate(String expectedLabel, Rect firstBounds,
                                      String expectedPackage, long generation, int firstScore) {
-        if (ocrInFlight) {
-            logDiagnostic(expectedPackage, "OCR_CONFIRM_BUSY", "另一轮 OCR 正在执行，二次截图确认已合并");
+        if (!tryBeginOcrWork(expectedPackage)) {
+            logDiagnostic(expectedPackage, "OCR_CONFIRM_BUSY", "另一轮 OCR 正在执行；本次二次确认已安全取消，避免并发截图");
             return;
         }
-        ocrInFlight = true;
         mainHandler.postDelayed(() -> {
             if (destroyed || database == null) {
-                ocrInFlight = false;
+                finishOcrWork();
                 return;
             }
             if (!isOcrEnabled()) {
                 logDiagnostic(expectedPackage, "OCR_CONFIRM_DISABLED", "二次截图前 OCR 已关闭");
-                ocrInFlight = false;
+                finishOcrWork();
                 return;
             }
             if (!isActiveWindowSafeForTarget(expectedPackage, generation)) {
                 logDiagnostic(expectedPackage, "OCR_CONFIRM_STALE",
                         "二次截图前目标窗口发生变化或检测到敏感输入区域");
-                ocrInFlight = false;
+                finishOcrWork();
                 return;
             }
             if (!database.isAppEnabled(expectedPackage)
                     || database.isLabelSuppressed(expectedPackage, expectedLabel)) {
                 logDiagnostic(expectedPackage, "OCR_CONFIRM_RULE_BLOCKED",
                         "二次截图前应用规则已关闭或候选已被用户屏蔽");
-                ocrInFlight = false;
+                finishOcrWork();
                 return;
             }
             if (SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
                 logDiagnostic(expectedPackage, "CLICK_COOLDOWN", "二次截图确认时仍处于点击冷却期");
-                ocrInFlight = false;
+                finishOcrWork();
                 return;
             }
             try {
@@ -1495,7 +1721,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             bitmap = copyScreenshotBitmap(result);
                             if (bitmap == null) {
                                 logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR", "二次截图为空或无法转换为位图");
-                                ocrInFlight = false;
+                                finishOcrWork();
                                 return;
                             }
                             Bitmap bounded = resizeForOcr(bitmap);
@@ -1507,20 +1733,20 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
                             logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR",
                                     "二次截图预处理异常：" + failure.getClass().getSimpleName());
-                            ocrInFlight = false;
+                            finishOcrWork();
                         }
                     }
 
                     @Override public void onFailure(int errorCode) {
                         logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR",
                                 "Android 二次截图 API 失败，错误码=" + errorCode);
-                        ocrInFlight = false;
+                        finishOcrWork();
                     }
                 });
             } catch (Throwable failure) {
                 logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR",
                         "请求二次截图异常：" + failure.getClass().getSimpleName());
-                ocrInFlight = false;
+                finishOcrWork();
             }
         }, ExtremeSkipPolicy.confirmationDelayMs(isExtremeSkipMode()));
     }
@@ -1537,14 +1763,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private void runOcrConfirmationPass(Bitmap bitmap, String expectedLabel, Rect firstBounds,
                                         String expectedPackage, long generation, int firstScore,
                                         List<TextRecognizer> recognizers, int recognizerIndex) {
+        final long modelStartedAt = SystemClock.elapsedRealtime();
         if (destroyed || bitmap == null || bitmap.isRecycled()) {
             if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
-            ocrInFlight = false;
+            finishOcrWork();
             return;
         }
         if (recognizerIndex >= recognizers.size()) {
             if (!bitmap.isRecycled()) bitmap.recycle();
-            ocrInFlight = false;
+            finishOcrWork();
             if (database != null) {
                 database.log(expectedPackage, safeLogLabel(expectedLabel), "BLOCKED",
                         "二次 OCR 未找到文字与位置均匹配的候选；未执行点击");
@@ -1560,6 +1787,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         try {
             Task<Text> task = recognizer.process(InputImage.fromBitmap(bitmap, 0));
             task.addOnCompleteListener(completed -> {
+                logDiagnostic(expectedPackage, "OCR_CONFIRM_MODEL_DURATION",
+                        recognizerName(recognizer) + "二次确认模型耗时 "
+                                + Math.max(0L, SystemClock.elapsedRealtime() - modelStartedAt) + " ms");
                 boolean handedToFallback = false;
                 try {
                     if (destroyed) return;
@@ -1697,7 +1927,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 } finally {
                     if (!handedToFallback) {
                         if (!bitmap.isRecycled()) bitmap.recycle();
-                        ocrInFlight = false;
+                        finishOcrWork();
                     }
                 }
             });
@@ -1709,7 +1939,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         generation, firstScore, recognizers, recognizerIndex + 1);
             } else {
                 if (!bitmap.isRecycled()) bitmap.recycle();
-                ocrInFlight = false;
+                finishOcrWork();
                 logDiagnostic(expectedPackage, "OCR_CONFIRM_ERROR", "全部二次 OCR 模型调用失败");
             }
         }
@@ -1890,6 +2120,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @Override public void onInterrupt() {
         // An interrupted service must never complete a previously queued OCR/node click.
         windowGeneration++;
+        pendingOcrRequests.clear();
         cancelPendingNodeConfirmation();
         cancelPendingCountdownRescan();
         cancelPendingSplashProbe();
@@ -1898,6 +2129,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     @Override public void onDestroy() {
         destroyed = true;
+        pendingOcrRequests.clear();
         windowGeneration++;
         cancelPendingNodeConfirmation();
         cancelPendingCountdownRescan();
@@ -1915,6 +2147,27 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (database != null) database.close();
         screenshotExecutor.shutdownNow();
         super.onDestroy();
+    }
+
+    private static final class PendingOcrRequest {
+        final String expectedPackage;
+        boolean adContext;
+        boolean allowVisualProbe;
+        final long generation;
+        String treeContext;
+        boolean splashProbe;
+        final long queuedAt;
+
+        PendingOcrRequest(String expectedPackage, boolean adContext, boolean allowVisualProbe,
+                          long generation, String treeContext, boolean splashProbe, long queuedAt) {
+            this.expectedPackage = expectedPackage;
+            this.adContext = adContext;
+            this.allowVisualProbe = allowVisualProbe;
+            this.generation = generation;
+            this.treeContext = treeContext;
+            this.splashProbe = splashProbe;
+            this.queuedAt = queuedAt;
+        }
     }
 
     private static final class Candidate {
