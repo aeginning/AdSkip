@@ -20,4 +20,6 @@ DNS 过滤：%2$s</string>
     <string name="floating_overlay_title">AdSkip · 状态</string>
     <string name="floating_overlay_size_value">%1$s：%2$d %3$s</string>
     <string name="floating_overlay_size_description">%1$s，%2$d 到 %3$d %4$s</string>
+    <string name="extreme_skip_mode_label">开启极速识别模式（高频扫描 / OCR）</string>
+    <string name="custom_skip_words_count">已保存 %1$d / %2$d 条</string>
 </resources>
