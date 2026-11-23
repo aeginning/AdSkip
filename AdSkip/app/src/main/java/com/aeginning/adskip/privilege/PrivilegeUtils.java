@@ -62,15 +62,22 @@ public final class PrivilegeUtils {
      */
     public static String extractTopResumedPackage(String output) {
         if (output == null || output.trim().isEmpty()) return "";
-        for (String line : output.split("\\r?\\n")) {
-            String value = line.trim();
-            if (value.contains("topResumedActivity")
-                    || value.contains("mResumedActivity")
-                    || value.contains("ResumedActivity")) {
-                String candidate = extractForegroundPackage(value);
+        String[] lines = output.split("\\r?\\n");
+
+        // Prefer the single top-resumed Activity when Android exposes it. In split-screen
+        // and multi-resume states, mResumedActivity may refer to another visible app.
+        String[] fieldsByPriority = {"topResumedActivity", "mResumedActivity", "ResumedActivity"};
+        for (String field : fieldsByPriority) {
+            for (String line : lines) {
+                String value = line.trim();
+                int marker = value.indexOf(field);
+                if (marker < 0) continue;
+                String candidate = extractForegroundPackage(value.substring(marker + field.length()));
                 if (isValidPackageName(candidate)) return candidate;
             }
         }
+        // Paused Activity fields are intentionally ignored so stale background state
+        // cannot be mistaken for the current foreground application.
         return "";
     }
 

@@ -4,11 +4,18 @@ package com.aeginning.adskip.engine;
 public final class RecognitionStatusPolicy {
     private RecognitionStatusPolicy() { }
 
+    /** True only when a valid user-facing state differs from the currently queued state. */
+    public static boolean shouldUpdate(String previous, String next) {
+        if (next == null || next.trim().isEmpty()) return false;
+        return !next.equals(previous);
+    }
+
     public static String fromDiagnostic(String action) {
         if (action == null) return null;
         switch (action) {
             case "SCAN":
             case "PRIVILEGED_FOREGROUND_DETECTED": return "正在扫描";
+            case "PRIVILEGED_NO_FOREGROUND_PACKAGE": return "等待前台应用信息";
             case "OCR_START": return "正在识别（OCR）";
             case "OCR_QUEUED":
             case "OCR_QUEUE_REPLACED":
