@@ -10,8 +10,8 @@ android {
         applicationId 'com.aeginning.adskip'
         minSdk 26
         targetSdk 36
-        versionCode 149
-        versionName '1.4.4'
+        versionCode 150
+        versionName '1.4.5'
     }
 
     compileOptions {
