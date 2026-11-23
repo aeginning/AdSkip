@@ -22,8 +22,7 @@ public final class PrivilegeProbePolicy {
      * newly enabled. This lets users enable the current app without reopening it.
      */
     public static boolean shouldProbeForeground(String previousPackage, boolean previousEnabled,
-                                                String currentPackage, boolean currentEnabled,
-                                                String ownPackage) {
+                                                String currentPackage, boolean currentEnabled) {
         String current = normalize(currentPackage);
         if (current.isEmpty()) return false;
         // The caller also records the AdSkip package as the latest observation,
