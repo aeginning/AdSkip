@@ -50,7 +50,7 @@ public class PrivilegeUtilsTest {
 
     @Test public void topResumedActivityTakesPriorityOverOtherResumedActivities() {
         assertEquals("com.example.top", PrivilegeUtils.extractTopResumedPackage(
-                "mResumedActivity: ActivityRecord{8 x u0 com.example.other/.OtherActivity}\\n"
+                "mResumedActivity: ActivityRecord{8 x u0 com.example.other/.OtherActivity}\n"
                         + "topResumedActivity=ActivityRecord{12 y u0 com.example.top/.HomeActivity}"));
     }
 
