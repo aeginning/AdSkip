@@ -66,7 +66,9 @@ public final class SafetyPolicy {
         if (bounds == null || screenWidth <= 0 || screenHeight <= 0) return false;
         if (bounds.isEmpty() || bounds.left < 0 || bounds.top < 0
                 || bounds.right > screenWidth || bounds.bottom > screenHeight) return false;
-        boolean closeGlyphCandidate = TextMatcher.isCloseGlyph(candidateText);
+        String normalizedCandidate = TextMatcher.normalize(candidateText);
+        String normalizedContext = TextMatcher.normalize(surroundingText);
+        boolean closeGlyphCandidate = TextMatcher.isCloseGlyphNormalized(normalizedCandidate);
         int minWidth = closeGlyphCandidate ? 12 : 24;
         int minHeight = closeGlyphCandidate ? 12 : 18;
         if (bounds.width() < minWidth || bounds.height() < minHeight
@@ -74,9 +76,9 @@ public final class SafetyPolicy {
                 || bounds.height() > screenHeight * (closeGlyphCandidate ? 0.16f : 0.25f)) return false;
         // Keep coordinate actions away from system gesture regions. An explicitly
         // enabled, OCR-confirmed skip countdown may live in the top-right splash-ad slot.
-        boolean adContext = TextMatcher.hasAdContext(surroundingText);
+        boolean adContext = TextMatcher.hasAdContextNormalized(normalizedContext);
         boolean topRightCountdownControl = allowCountdownSkip
-                && TextMatcher.isCountdownSkipLabel(candidateText)
+                && TextMatcher.isCountdownSkipLabelNormalized(normalizedCandidate)
                 && adContext
                 && bounds.left >= screenWidth * 0.60f
                 && bounds.top >= screenHeight * 0.01f
@@ -89,7 +91,7 @@ public final class SafetyPolicy {
                 && SkipLayoutPolicy.isTopRightSkipPill(
                         bounds.left, bounds.top, bounds.right, bounds.bottom,
                         screenWidth, screenHeight);
-        boolean topRightCloseGlyph = TextMatcher.isCloseGlyph(candidateText)
+        boolean topRightCloseGlyph = closeGlyphCandidate
                 && adContext
                 && bounds.left >= screenWidth * 0.55f
                 && bounds.centerX() >= screenWidth * 0.74f
@@ -103,7 +105,7 @@ public final class SafetyPolicy {
                     && !topRightCountdownControl && !topRightCloseGlyph && !topRightSkipPill)
                 || bounds.bottom > screenHeight * 0.96f) return false;
         // A lone X is accepted only as a small, top-right ad close affordance.
-        if (TextMatcher.isCloseGlyph(candidateText) && !topRightCloseGlyph) return false;
+        if (closeGlyphCandidate && !topRightCloseGlyph) return false;
 
         AdConfidenceScorer.Assessment assessment = precomputedAssessment != null
                 ? precomputedAssessment
@@ -111,7 +113,7 @@ public final class SafetyPolicy {
                         bounds.width(), bounds.height(), screenWidth, screenHeight,
                         allowCountdownSkip, minimumScore, customSkipWords, topRightSkipPill);
         return assessment.score >= Math.max(50, Math.min(95, minimumScore))
-                && !TextMatcher.isDangerous(candidateText)
-                && !TextMatcher.hasCriticalActionContext(surroundingText);
+                && !TextMatcher.isDangerousNormalized(normalizedCandidate)
+                && !TextMatcher.hasCriticalActionContextNormalized(normalizedContext);
     }
 }
