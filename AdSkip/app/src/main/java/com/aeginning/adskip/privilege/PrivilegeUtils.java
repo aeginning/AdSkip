@@ -55,6 +55,25 @@ public final class PrivilegeUtils {
         return "";
     }
 
+    /**
+     * Extract a package only from an explicitly resumed-activity field.
+     * Paused activities are intentionally ignored so a stale background task
+     * cannot be mistaken for the current foreground app.
+     */
+    public static String extractTopResumedPackage(String output) {
+        if (output == null || output.trim().isEmpty()) return "";
+        for (String line : output.split("\\r?\\n")) {
+            String value = line.trim();
+            if (value.contains("topResumedActivity")
+                    || value.contains("mResumedActivity")
+                    || value.contains("ResumedActivity")) {
+                String candidate = extractForegroundPackage(value);
+                if (isValidPackageName(candidate)) return candidate;
+            }
+        }
+        return "";
+    }
+
     public static String sanitizePackageList(String output, int maxPackages) {
         if (output == null || output.isEmpty()) return "未读取到应用列表。";
         List<String> packages = new ArrayList<>();
