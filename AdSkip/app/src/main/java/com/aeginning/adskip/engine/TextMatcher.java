@@ -13,6 +13,8 @@ public final class TextMatcher {
     private static final Pattern FORMAT_CONTROL_PATTERN = Pattern.compile("\\p{Cf}");
     private static final Pattern WHITESPACE_PATTERN = Pattern.compile("[\\s\\u00a0]+");
     private static final Pattern CLOSE_GLYPH_DECORATION_PATTERN = Pattern.compile("[\\p{Punct}\\s]");
+    private static final Pattern COMPACT_TEXT_PATTERN =
+            Pattern.compile("[\\s\\p{Punct}，。！？、；：]");
     private static final Pattern AD_WORD_PATTERN = Pattern.compile("\\bad\\b");
     private static final String COUNTDOWN_UNITS =
             "(?:seconds?|secs?|s|segundos?|seg|seconde?s?|sekunden?|sekund(?:e|en)?|"
@@ -294,8 +296,8 @@ public final class TextMatcher {
                 Math.round((1f - distance / (float) length) * 100f)));
 
         // OCR may insert/remove harmless whitespace or punctuation around short controls.
-        String compactA = a.replaceAll("[\\s\\p{Punct}，。！？、；：]", "");
-        String compactB = b.replaceAll("[\\s\\p{Punct}，。！？、；：]", "");
+        String compactA = COMPACT_TEXT_PATTERN.matcher(a).replaceAll("");
+        String compactB = COMPACT_TEXT_PATTERN.matcher(b).replaceAll("");
         if (!compactA.isEmpty() && compactA.equals(compactB)) return 100;
         return editSimilarity;
     }
