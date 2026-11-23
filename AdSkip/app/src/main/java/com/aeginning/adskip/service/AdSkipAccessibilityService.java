@@ -1076,6 +1076,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                 "Shizuku 前台窗口读取失败：" + resultFailure + "；继续使用无障碍事件");
                     } else if (!resultPackage.isEmpty()) {
                         handlePrivilegedForegroundPackage(resultPackage);
+                    } else {
+                        logDiagnostic("", "PRIVILEGED_NO_FOREGROUND_PACKAGE",
+                                "Shizuku 可用，但系统未返回可识别的 top-resumed 前台包名；已降低轮询频率");
                     }
                     boolean foregroundResolved = resultFailure.isEmpty() && !resultPackage.isEmpty();
                     scheduleForegroundProbe(PrivilegeProbePolicy.nextIntervalMs(
