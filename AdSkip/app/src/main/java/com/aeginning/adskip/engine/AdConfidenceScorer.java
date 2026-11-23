@@ -49,6 +49,16 @@ public final class AdConfidenceScorer {
                                     int targetHeight, int screenWidth, int screenHeight,
                                     boolean allowCountdownSkip, int minimumScore,
                                     List<String> customSkipWords) {
+        return assess(label, screenText, clickable, enabled, visible, targetWidth, targetHeight,
+                screenWidth, screenHeight, allowCountdownSkip, minimumScore,
+                customSkipWords, false);
+    }
+
+    public static Assessment assess(String label, String screenText, boolean clickable,
+                                    boolean enabled, boolean visible, int targetWidth,
+                                    int targetHeight, int screenWidth, int screenHeight,
+                                    boolean allowCountdownSkip, int minimumScore,
+                                    List<String> customSkipWords, boolean allowTopRightSkipFallback) {
         String candidate = normalize(label);
         String context = normalize(screenText);
         if (candidate.isEmpty()) return result(0, "空标签");
