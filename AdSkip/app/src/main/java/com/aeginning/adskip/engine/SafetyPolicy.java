@@ -69,6 +69,7 @@ public final class SafetyPolicy {
         // Allow common OEM/ad-SDK close-button layouts beyond the very narrow
         // top-right corner, while retaining a strict ad-context and upper-right gate.
         boolean topRightSkipPill = allowTopRightSkipFallback
+                && !adContext
                 && TextMatcher.isGenericSkipLabel(candidateText)
                 && SkipLayoutPolicy.isTopRightSkipPill(
                         bounds.left, bounds.top, bounds.right, bounds.bottom,
