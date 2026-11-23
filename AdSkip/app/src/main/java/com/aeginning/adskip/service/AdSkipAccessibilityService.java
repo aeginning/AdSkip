@@ -27,6 +27,7 @@ import com.aeginning.adskip.engine.TargetStability;
 import com.aeginning.adskip.engine.SplashProbePolicy;
 import com.aeginning.adskip.engine.ExtremeSkipPolicy;
 import com.aeginning.adskip.engine.SkipWordLibrary;
+import com.aeginning.adskip.engine.OcrRegionPolicy;
 import com.aeginning.adskip.engine.SkipLayoutPolicy;
 import com.aeginning.adskip.engine.PrivilegeProbePolicy;
 import com.aeginning.adskip.engine.RecognitionStatusPolicy;
@@ -1374,7 +1375,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         logDiagnostic(expectedPackage, "OCR_PREPROCESS_DURATION",
                                 "截图复制与缩放耗时 "
                                         + Math.max(0L, SystemClock.elapsedRealtime() - preprocessStartedAt) + " ms");
-                        runRecognizers(bounded, expectedPackage, generation, treeContext);
+                        runRecognizers(bounded, expectedPackage, generation, treeContext, splashProbe);
                         bitmap = null;
                     } catch (Throwable failure) {
                         if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
@@ -1553,7 +1554,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         return "未知";
     }
 
-    private void runRecognizers(Bitmap bitmap, String expectedPackage, long generation, String treeContext) {
+    private void runRecognizers(Bitmap bitmap, String expectedPackage, long generation,
+                                 String treeContext, boolean splashProbe) {
         List<TextRecognizer> recognizers = getRecognizerOrder(treeContext);
         if (recognizers.isEmpty()) {
             if (!bitmap.isRecycled()) bitmap.recycle();
@@ -1561,18 +1563,58 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             logDiagnostic(expectedPackage, "OCR_ERROR", "没有可用的本地 OCR 识别模型");
             return;
         }
-        runOcrPass(bitmap, expectedPackage, generation, recognizers, 0);
+
+        int fullWidth = bitmap.getWidth();
+        int fullHeight = bitmap.getHeight();
+        if (OcrRegionPolicy.shouldTryTopRightFirst(
+                TextMatcher.hasAdContext(treeContext), splashProbe)
+                && OcrRegionPolicy.canCrop(fullWidth, fullHeight)) {
+            int left = OcrRegionPolicy.left(fullWidth);
+            int top = OcrRegionPolicy.top(fullHeight);
+            int right = OcrRegionPolicy.right(fullWidth);
+            int bottom = OcrRegionPolicy.bottom(fullHeight);
+            Bitmap region = null;
+            try {
+                region = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top);
+            } catch (RuntimeException failure) {
+                logDiagnostic(expectedPackage, "OCR_REGION_UNAVAILABLE",
+                        "右上角优先区域裁剪失败；改用完整截图识别：" + failure.getClass().getSimpleName());
+            }
+            if (region != null) {
+                logDiagnostic(expectedPackage, "OCR_REGION_START",
+                        "广告上下文或开屏探测命中；先识别右上角高概率跳过区域，未命中将自动回退全屏");
+                runOcrPass(region, bitmap, expectedPackage, generation, recognizers, 0,
+                        left, top, fullWidth, fullHeight, true, treeContext);
+                return;
+            }
+        }
+
+        runOcrPass(bitmap, null, expectedPackage, generation, recognizers, 0,
+                0, 0, fullWidth, fullHeight, false, treeContext);
     }
 
-    private void runOcrPass(Bitmap bitmap, String expectedPackage, long generation,
-                            List<TextRecognizer> recognizers, int recognizerIndex) {
+    private void runOcrPass(Bitmap bitmap, Bitmap fullFrameFallback,
+                            String expectedPackage, long generation,
+                            List<TextRecognizer> recognizers, int recognizerIndex,
+                            int offsetX, int offsetY, int fullWidth, int fullHeight,
+                            boolean regionPass, String treeContext) {
         if (destroyed || bitmap == null || bitmap.isRecycled()) {
             if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+            if (fullFrameFallback != null && !fullFrameFallback.isRecycled()) fullFrameFallback.recycle();
             finishOcrWork();
             return;
         }
         if (recognizerIndex >= recognizers.size()) {
+            if (regionPass && fullFrameFallback != null && !fullFrameFallback.isRecycled()) {
+                bitmap.recycle();
+                logDiagnostic(expectedPackage, "OCR_REGION_MISS",
+                        "右上角区域未找到可用候选；立即使用同一帧完整截图兜底");
+                runOcrPass(fullFrameFallback, null, expectedPackage, generation, recognizers, 0,
+                        0, 0, fullWidth, fullHeight, false, treeContext);
+                return;
+            }
             if (!bitmap.isRecycled()) bitmap.recycle();
+            if (fullFrameFallback != null && !fullFrameFallback.isRecycled()) fullFrameFallback.recycle();
             finishOcrWork();
             logDiagnostic(expectedPackage, "OCR_NO_CANDIDATE",
                     "已按优先顺序尝试全部可用语言模型，仍未发现明确且安全的跳过/关闭控件");
@@ -1581,39 +1623,49 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
         TextRecognizer recognizer = recognizers.get(recognizerIndex);
         final long modelStartedAt = SystemClock.elapsedRealtime();
-        final int sourceWidth = bitmap.getWidth();
-        final int sourceHeight = bitmap.getHeight();
         try {
             InputImage image = InputImage.fromBitmap(bitmap, 0);
             Task<Text> task = recognizer.process(image);
             task.addOnCompleteListener(completed -> {
                 logDiagnostic(expectedPackage, "OCR_MODEL_DURATION",
                         recognizerName(recognizer) + "模型耗时 "
-                                + Math.max(0L, SystemClock.elapsedRealtime() - modelStartedAt) + " ms");
+                                + Math.max(0L, SystemClock.elapsedRealtime() - modelStartedAt) + " ms"
+                                + (regionPass ? "（右上优先区域）" : "（全屏）"));
                 boolean handedToFallback = false;
                 try {
                     if (destroyed) return;
                     if (!completed.isSuccessful() || completed.getResult() == null) {
                         logDiagnostic(expectedPackage, "OCR_MODEL_ERROR",
-                                recognizerName(recognizer) + "模型未能完成识别；尝试下一个语言模型");
-                        if (recognizerIndex + 1 < recognizers.size()) {
+                                recognizerName(recognizer) + "模型未能完成识别");
+                        if (!regionPass && recognizerIndex + 1 < recognizers.size()) {
                             handedToFallback = true;
-                            runOcrPass(bitmap, expectedPackage, generation, recognizers, recognizerIndex + 1);
+                            runOcrPass(bitmap, fullFrameFallback, expectedPackage, generation,
+                                    recognizers, recognizerIndex + 1, offsetX, offsetY,
+                                    fullWidth, fullHeight, false, treeContext);
+                        } else if (regionPass && fullFrameFallback != null) {
+                            handedToFallback = true;
+                            bitmap.recycle();
+                            logDiagnostic(expectedPackage, "OCR_REGION_FALLBACK",
+                                    "右上角区域模型未完成；改用完整截图和完整语言回退链");
+                            runOcrPass(fullFrameFallback, null, expectedPackage, generation,
+                                    recognizers, 0, 0, 0, fullWidth, fullHeight, false, treeContext);
                         } else {
-                            logDiagnostic(expectedPackage, "OCR_ERROR",
-                                    "全部语言模型均未成功返回识别结果");
+                            logDiagnostic(expectedPackage, "OCR_ERROR", "当前截图的 OCR 模型未能返回有效结果");
                         }
                         return;
                     }
 
                     Text result = completed.getResult();
-                    String context = result.getText() == null ? "" : result.getText();
+                    String ocrText = result.getText() == null ? "" : result.getText();
+                    String candidateContext = treeContext == null || treeContext.trim().isEmpty()
+                            ? ocrText : treeContext + " " + ocrText;
                     logDiagnostic(expectedPackage, "OCR_SUCCESS",
-                            recognizerName(recognizer) + "模型完成识别；文本块=" + result.getTextBlocks().size());
-                    if (TextMatcher.isCountdown(context)) {
+                            recognizerName(recognizer) + "模型完成识别；文本块=" + result.getTextBlocks().size()
+                                    + (regionPass ? "；区域=右上优先区" : "；区域=全屏"));
+                    if (TextMatcher.isCountdown(ocrText) || TextMatcher.isCountdown(treeContext)) {
                         cancelPendingSplashProbe();
                         logDiagnostic(expectedPackage, "OCR_COUNTDOWN_WAIT",
-                                "OCR 图像仍检测到倒计时；保持主动扫描任务");
+                                "OCR 图像或控件树仍检测到倒计时；保持主动扫描任务");
                         mainHandler.post(() -> scheduleCountdownRescan(expectedPackage, generation));
                     } else if (countdownRescanPackage != null) {
                         logDiagnostic(expectedPackage, "OCR_COUNTDOWN_ENDED",
@@ -1631,34 +1683,39 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             String lineText = line.getText();
                             Rect box = line.getBoundingBox();
                             if (box == null || isSuppressedLabel(suppressedLabels, lineText)) continue;
+                            Rect absoluteBox = new Rect(box);
+                            absoluteBox.offset(offsetX, offsetY);
                             boolean topRightSkipFallback = isTopRightSkipFallback(
-                                    lineText, box, sourceWidth, sourceHeight, context);
+                                    lineText, absoluteBox, fullWidth, fullHeight, candidateContext);
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
-                                    lineText, context, true, true, true, box.width(), box.height(),
-                                    sourceWidth, sourceHeight,
+                                    lineText, candidateContext, true, true, true,
+                                    absoluteBox.width(), absoluteBox.height(), fullWidth, fullHeight,
                                     allowCountdownClicks, getMinimumSkipScore(), customSkipWords,
                                     topRightSkipFallback);
                             if (assessment.score >= getMinimumSkipScore() && assessment.score > bestScore) {
-                                best = new OcrCandidate(new Rect(box), lineText, assessment.score,
+                                best = new OcrCandidate(new Rect(absoluteBox), lineText, assessment.score,
                                         topRightSkipFallback);
                                 bestScore = assessment.score;
                             }
 
                             // Some close affordances are rendered as one glyph inside a
-                            // longer OCR line. Inspect individual elements without relaxing
-                            // the final ad-context and top-right geometry safety checks.
+                            // longer OCR line. Preserve their original screen position after
+                            // regional OCR, then apply the same final safety policy.
                             for (Text.Element element : line.getElements()) {
                                 String elementText = element.getText();
                                 Rect elementBox = element.getBoundingBox();
                                 if (elementBox == null || !TextMatcher.isCloseGlyph(elementText)
                                         || isSuppressedLabel(suppressedLabels, elementText)) continue;
+                                Rect absoluteElementBox = new Rect(elementBox);
+                                absoluteElementBox.offset(offsetX, offsetY);
                                 AdConfidenceScorer.Assessment glyphAssessment = AdConfidenceScorer.assess(
-                                        elementText, context, true, true, true,
-                                        elementBox.width(), elementBox.height(), sourceWidth, sourceHeight,
-                                        allowCountdownClicks, getMinimumSkipScore(), customSkipWords);
+                                        elementText, candidateContext, true, true, true,
+                                        absoluteElementBox.width(), absoluteElementBox.height(),
+                                        fullWidth, fullHeight, allowCountdownClicks,
+                                        getMinimumSkipScore(), customSkipWords);
                                 if (glyphAssessment.score >= getMinimumSkipScore()
                                         && glyphAssessment.score > bestScore) {
-                                    best = new OcrCandidate(new Rect(elementBox),
+                                    best = new OcrCandidate(new Rect(absoluteElementBox),
                                             elementText, glyphAssessment.score);
                                     bestScore = glyphAssessment.score;
                                 }
@@ -1667,14 +1724,23 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     }
 
                     if (best == null) {
-                        if (recognizerIndex + 1 < recognizers.size()) {
+                        if (!regionPass && recognizerIndex + 1 < recognizers.size()) {
                             logDiagnostic(expectedPackage, "OCR_FALLBACK",
                                     recognizerName(recognizer) + "模型未找到候选，继续使用下一个语言模型");
                             handedToFallback = true;
-                            runOcrPass(bitmap, expectedPackage, generation, recognizers, recognizerIndex + 1);
+                            runOcrPass(bitmap, fullFrameFallback, expectedPackage, generation,
+                                    recognizers, recognizerIndex + 1, offsetX, offsetY,
+                                    fullWidth, fullHeight, false, treeContext);
+                        } else if (regionPass && fullFrameFallback != null) {
+                            handedToFallback = true;
+                            bitmap.recycle();
+                            logDiagnostic(expectedPackage, "OCR_REGION_MISS",
+                                    "右上角区域没有达到安全评分门槛的候选；全屏识别兜底以避免漏检");
+                            runOcrPass(fullFrameFallback, null, expectedPackage, generation,
+                                    recognizers, 0, 0, 0, fullWidth, fullHeight, false, treeContext);
                         } else {
                             logDiagnostic(expectedPackage, "OCR_NO_CANDIDATE",
-                                    "全部语言模型均未找到达到灵敏度门槛的安全候选");
+                                    "全部可用语言模型均未找到达到灵敏度门槛的安全候选");
                         }
                         return;
                     }
@@ -1684,19 +1750,30 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         if (expectedPackage.equals(splashProbePackage)) cancelPendingSplashProbe();
                     });
                     logDiagnostic(expectedPackage, "OCR_CANDIDATE",
-                            recognizerName(recognizer) + "模型发现候选，置信度=" + selected.score);
-                    mainHandler.post(() -> executeOcrCandidate(selected, context, sourceWidth,
-                            sourceHeight, expectedPackage, generation));
+                            recognizerName(recognizer) + "模型发现候选，置信度=" + selected.score
+                                    + (regionPass ? "；来源=右上优先区域" : "；来源=全屏"));
+                    mainHandler.post(() -> executeOcrCandidate(selected, candidateContext, fullWidth,
+                            fullHeight, expectedPackage, generation));
                 } catch (Throwable failure) {
                     logDiagnostic(expectedPackage, "OCR_ERROR",
                             "OCR 结果处理异常：" + failure.getClass().getSimpleName());
-                    if (!destroyed && recognizerIndex + 1 < recognizers.size()) {
+                    if (!destroyed && !regionPass && recognizerIndex + 1 < recognizers.size()) {
                         handedToFallback = true;
-                        runOcrPass(bitmap, expectedPackage, generation, recognizers, recognizerIndex + 1);
+                        runOcrPass(bitmap, fullFrameFallback, expectedPackage, generation,
+                                recognizers, recognizerIndex + 1, offsetX, offsetY,
+                                fullWidth, fullHeight, false, treeContext);
+                    } else if (!destroyed && regionPass && fullFrameFallback != null) {
+                        handedToFallback = true;
+                        bitmap.recycle();
+                        runOcrPass(fullFrameFallback, null, expectedPackage, generation,
+                                recognizers, 0, 0, 0, fullWidth, fullHeight, false, treeContext);
                     }
                 } finally {
                     if (!handedToFallback) {
                         if (!bitmap.isRecycled()) bitmap.recycle();
+                        if (fullFrameFallback != null && !fullFrameFallback.isRecycled()) {
+                            fullFrameFallback.recycle();
+                        }
                         finishOcrWork();
                     }
                 }
@@ -1707,12 +1784,20 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             + Math.max(0L, SystemClock.elapsedRealtime() - modelStartedAt) + " ms");
             logDiagnostic(expectedPackage, "OCR_MODEL_ERROR",
                     recognizerName(recognizer) + "模型调用异常：" + failure.getClass().getSimpleName());
-            if (recognizerIndex + 1 < recognizers.size()) {
-                runOcrPass(bitmap, expectedPackage, generation, recognizers, recognizerIndex + 1);
+            if (!regionPass && recognizerIndex + 1 < recognizers.size()) {
+                runOcrPass(bitmap, fullFrameFallback, expectedPackage, generation,
+                        recognizers, recognizerIndex + 1, offsetX, offsetY,
+                        fullWidth, fullHeight, false, treeContext);
+            } else if (regionPass && fullFrameFallback != null) {
+                bitmap.recycle();
+                runOcrPass(fullFrameFallback, null, expectedPackage, generation,
+                        recognizers, 0, 0, 0, fullWidth, fullHeight, false, treeContext);
             } else {
                 if (!bitmap.isRecycled()) bitmap.recycle();
+                if (fullFrameFallback != null && !fullFrameFallback.isRecycled()) {
+                    fullFrameFallback.recycle();
+                }
                 finishOcrWork();
-                logDiagnostic(expectedPackage, "OCR_ERROR", "所有语言模型均无法处理当前截图");
             }
         }
     }
