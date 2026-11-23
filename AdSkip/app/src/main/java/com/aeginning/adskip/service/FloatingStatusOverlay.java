@@ -34,20 +34,21 @@ final class FloatingStatusOverlay {
     static final String PREF_SHOW_DNS_BLOCKS = "floating_overlay_show_dns_blocks";
     static final String PREF_SHOW_NO_ACTION = "floating_overlay_show_no_action";
     static final String PREF_SHOW_ERRORS = "floating_overlay_show_errors";
+    static final String PREF_SHOW_RECOGNITION_STATE = "floating_overlay_show_recognition_state";
     static final String PREF_WIDTH_DP = "floating_overlay_width_dp";
     static final String PREF_HEIGHT_DP = "floating_overlay_height_dp";
     static final String PREF_TEXT_SIZE_SP = "floating_overlay_text_size_sp";
     static final String PREF_X = "floating_overlay_x";
     static final String PREF_Y = "floating_overlay_y";
 
-    static final int DEFAULT_WIDTH_DP = 178;
-    static final int MIN_WIDTH_DP = 150;
+    static final int DEFAULT_WIDTH_DP = 148;
+    static final int MIN_WIDTH_DP = 104;
     static final int MAX_WIDTH_DP = 560;
-    static final int DEFAULT_HEIGHT_DP = 190;
-    static final int MIN_HEIGHT_DP = 120;
+    static final int DEFAULT_HEIGHT_DP = 132;
+    static final int MIN_HEIGHT_DP = 76;
     static final int MAX_HEIGHT_DP = 900;
-    static final int DEFAULT_TEXT_SIZE_SP = 10;
-    static final int MIN_TEXT_SIZE_SP = 9;
+    static final int DEFAULT_TEXT_SIZE_SP = 8;
+    static final int MIN_TEXT_SIZE_SP = 7;
     static final int MAX_TEXT_SIZE_SP = 24;
 
     private static final long REFRESH_INTERVAL_MS = 1_200L;
@@ -67,6 +68,8 @@ final class FloatingStatusOverlay {
     private boolean expanded = true;
     private long lastRefreshAt;
     private String lastText = "";
+    private String recognitionState = "等待目标应用";
+    private RuleDatabase lastDatabase;
     private int appliedWidth = -1;
     private int appliedHeight = -1;
     private int appliedTextSize = -1;
@@ -84,7 +87,15 @@ final class FloatingStatusOverlay {
         touchSlop = ViewConfiguration.get(service).getScaledTouchSlop();
     }
 
+    void setRecognitionState(String state) {
+        String next = state == null || state.trim().isEmpty() ? "状态未知" : state.trim();
+        if (next.equals(recognitionState)) return;
+        recognitionState = next;
+        if (attached && lastDatabase != null) refresh(lastDatabase, true, true);
+    }
+
     void refresh(RuleDatabase database, boolean serviceAvailable, boolean force) {
+        lastDatabase = database;
         if (!preferences.getBoolean(PREF_ENABLED, false)) {
             remove();
             return;
@@ -135,7 +146,8 @@ final class FloatingStatusOverlay {
                 preferences.getBoolean(PREF_SHOW_SAFETY_BLOCKS, true), safetyBlocks24h,
                 preferences.getBoolean(PREF_SHOW_DNS_BLOCKS, true), dnsBlocks24h,
                 preferences.getBoolean(PREF_SHOW_NO_ACTION, false), noAction24h,
-                preferences.getBoolean(PREF_SHOW_ERRORS, false), errors24h);
+                preferences.getBoolean(PREF_SHOW_ERRORS, false), errors24h,
+                preferences.getBoolean(PREF_SHOW_RECOGNITION_STATE, true), recognitionState);
 
         if (!attached) ensurePanel();
         if (!attached) return;
@@ -174,7 +186,7 @@ final class FloatingStatusOverlay {
     private void createPanel() {
         panel = new LinearLayout(service);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(8), dp(5), dp(8), dp(6));
+        panel.setPadding(dp(5), dp(3), dp(5), dp(4));
         panel.setBackground(background(0xF21D2939, 0x665A7195, 16));
         panel.setElevation(dp(8));
         panel.setContentDescription("AdSkip 可调整大小的状态悬浮窗");
@@ -182,12 +194,12 @@ final class FloatingStatusOverlay {
         LinearLayout header = new LinearLayout(service);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        panel.addView(header, new LinearLayout.LayoutParams(-1, dp(30)));
+        panel.addView(header, new LinearLayout.LayoutParams(-1, dp(25)));
 
         title = new DragHandleView(service);
         title.setText(service.getString(R.string.floating_overlay_title));
         title.setTextColor(0xFFFFFFFF);
-        title.setTextSize(11);
+        title.setTextSize(Math.max(8, DEFAULT_TEXT_SIZE_SP + 1));
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         title.setSingleLine(true);
         title.setGravity(Gravity.CENTER_VERTICAL);
@@ -216,8 +228,8 @@ final class FloatingStatusOverlay {
         details = new TextView(service);
         details.setTextColor(0xFFF2F4F7);
         details.setIncludeFontPadding(false);
-        details.setLineSpacing(dp(1), 1.0f);
-        details.setPadding(dp(1), dp(4), dp(3), dp(4));
+        details.setLineSpacing(0, 1.0f);
+        details.setPadding(0, dp(2), dp(1), dp(2));
         details.setTextSize(DEFAULT_TEXT_SIZE_SP);
         details.setFocusable(false);
         detailsScroll.addView(details, new ScrollView.LayoutParams(-1, -2));
@@ -264,8 +276,8 @@ final class FloatingStatusOverlay {
         layoutParams.width = dp(widthDp);
         layoutParams.height = dp(heightDp);
         details.setTextSize(textSize);
-        details.setLineSpacing(dp(textSize <= 10 ? 1 : 2), 1.0f);
-        title.setTextSize(Math.max(10, Math.min(14, textSize + 1)));
+        details.setLineSpacing(dp(textSize <= 8 ? 0 : 1), 1.0f);
+        title.setTextSize(Math.max(8, Math.min(12, textSize + 1)));
         appliedWidth = widthDp;
         appliedHeight = heightDp;
         appliedTextSize = textSize;
@@ -283,13 +295,13 @@ final class FloatingStatusOverlay {
     private TextView headerButton(String value) {
         TextView button = new TextView(service);
         button.setText(value);
-        button.setTextSize(18);
+        button.setTextSize(Math.max(15, Math.min(20, DEFAULT_TEXT_SIZE_SP + 9)));
         button.setTextColor(0xFFFFFFFF);
         button.setGravity(Gravity.CENTER);
         button.setBackground(background(0x33FFFFFF, 0, 7));
         button.setPadding(dp(6), 0, dp(6), 0);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(26), dp(26));
-        params.leftMargin = dp(3);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(22), dp(22));
+        params.leftMargin = dp(2);
         button.setLayoutParams(params);
         button.setClickable(true);
         return button;
@@ -371,6 +383,7 @@ final class FloatingStatusOverlay {
         appliedHeight = -1;
         appliedTextSize = -1;
         lastText = "";
+        lastDatabase = null;
     }
 
     private static int clamp(int value, int min, int max) {
