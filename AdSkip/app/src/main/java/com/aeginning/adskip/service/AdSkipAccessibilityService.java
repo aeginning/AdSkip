@@ -667,6 +667,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if ("SCAN".equals(action)) interval = 4_000L;
         else if ("SCAN_THROTTLED".equals(action)) interval = 5_000L;
         else if ("APP_NOT_ENABLED".equals(action)) interval = 30_000L;
+        else if ("OCR_DURATION".equals(action) || "OCR_MODEL_DURATION".equals(action)
+                || "OCR_CAPTURE_LATENCY".equals(action) || "OCR_PREPROCESS_DURATION".equals(action)) interval = 0L;
         else interval = 1_200L;
         if (!diagnosticThrottle.shouldLog(safePackage + "|" + action,
                 SystemClock.elapsedRealtime(), interval)) return;
@@ -1142,12 +1144,18 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return;
         }
         lastOcrAt = now;
+        final long screenshotRequestedAt = SystemClock.elapsedRealtime();
         logDiagnostic(expectedPackage, "OCR_START",
                 "开始本地多语言 OCR；优先语言由系统语言和控件树字符特征决定；排队等待时间由 OCR_QUEUE_WAIT 单独记录");
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, new TakeScreenshotCallback() {
                 @Override public void onSuccess(ScreenshotResult result) {
                     Bitmap bitmap = null;
+                    long captureCallbackAt = SystemClock.elapsedRealtime();
+                    logDiagnostic(expectedPackage, "OCR_CAPTURE_LATENCY",
+                            "Android 截图回调耗时 " + Math.max(0L, captureCallbackAt - screenshotRequestedAt)
+                                    + " ms");
+                    long preprocessStartedAt = captureCallbackAt;
                     try {
                         bitmap = copyScreenshotBitmap(result);
                         if (bitmap == null) {
@@ -1157,6 +1165,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         }
                         Bitmap bounded = resizeForOcr(bitmap);
                         if (bounded != bitmap && !bitmap.isRecycled()) bitmap.recycle();
+                        logDiagnostic(expectedPackage, "OCR_PREPROCESS_DURATION",
+                                "截图复制与缩放耗时 "
+                                        + Math.max(0L, SystemClock.elapsedRealtime() - preprocessStartedAt) + " ms");
                         runRecognizers(bounded, expectedPackage, generation, treeContext);
                         bitmap = null;
                     } catch (Throwable failure) {
@@ -1168,6 +1179,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 }
 
                 @Override public void onFailure(int errorCode) {
+                    logDiagnostic(expectedPackage, "OCR_CAPTURE_LATENCY",
+                            "Android 截图失败回调耗时 "
+                                    + Math.max(0L, SystemClock.elapsedRealtime() - screenshotRequestedAt) + " ms");
                     logDiagnostic(expectedPackage, "OCR_ERROR", "Android 截图 API 返回错误码 " + errorCode
                             + "；可能受安全窗口、系统权限或厂商 ROM 限制");
                     finishOcrWork();
@@ -1349,12 +1363,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
 
         TextRecognizer recognizer = recognizers.get(recognizerIndex);
+        final long modelStartedAt = SystemClock.elapsedRealtime();
         final int sourceWidth = bitmap.getWidth();
         final int sourceHeight = bitmap.getHeight();
         try {
             InputImage image = InputImage.fromBitmap(bitmap, 0);
             Task<Text> task = recognizer.process(image);
             task.addOnCompleteListener(completed -> {
+                logDiagnostic(expectedPackage, "OCR_MODEL_DURATION",
+                        recognizerName(recognizer) + "模型耗时 "
+                                + Math.max(0L, SystemClock.elapsedRealtime() - modelStartedAt) + " ms");
                 boolean handedToFallback = false;
                 try {
                     if (destroyed) return;
@@ -1467,6 +1485,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 }
             });
         } catch (Throwable failure) {
+            logDiagnostic(expectedPackage, "OCR_MODEL_DURATION",
+                    recognizerName(recognizer) + "模型调用异常，耗时 "
+                            + Math.max(0L, SystemClock.elapsedRealtime() - modelStartedAt) + " ms");
             logDiagnostic(expectedPackage, "OCR_MODEL_ERROR",
                     recognizerName(recognizer) + "模型调用异常：" + failure.getClass().getSimpleName());
             if (recognizerIndex + 1 < recognizers.size()) {
