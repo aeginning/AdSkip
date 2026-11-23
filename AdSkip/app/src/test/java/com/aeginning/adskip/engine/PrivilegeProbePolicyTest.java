@@ -13,7 +13,7 @@ public class PrivilegeProbePolicyTest {
     @Test public void unavailableShizukuUsesSlowRetry() {
         assertEquals(2_500L, PrivilegeProbePolicy.retryWhenUnavailableMs());
         assertEquals(2_500L, PrivilegeProbePolicy.nextIntervalMs(false, true, true));
-        assertEquals(300L, PrivilegeProbePolicy.nextIntervalMs(true, true, true));
+        assertEquals(200L, PrivilegeProbePolicy.nextIntervalMs(true, true, true));
     }
 
     @Test public void newlyEnabledForegroundAppIsProbedWithoutReopeningIt() {
