@@ -61,7 +61,7 @@ public final class AdSkipShellUserService extends IAdSkipShellService.Stub {
 
     @Override public String getForegroundPackage() {
         String activity = getForegroundActivity();
-        return PrivilegeUtils.extractForegroundPackage(activity);
+        return PrivilegeUtils.extractTopResumedPackage(activity);
     }
 
     @Override public String getForegroundActivity() {
