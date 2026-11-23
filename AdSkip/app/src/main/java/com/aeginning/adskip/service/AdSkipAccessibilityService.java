@@ -1256,6 +1256,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 recycleNode(root);
                 logDiagnostic(packageName, "CLICK_VERIFIED",
                         source + "点击后前台应用已切换，原广告页面已离开");
+                SuccessNotificationManager.notifyAdSkip(this, packageName);
                 return;
             }
 
@@ -1301,6 +1302,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 } else {
                     logDiagnostic(packageName, "CLICK_VERIFIED",
                             source + "点击后原候选已消失或位置/页面已变化");
+                    SuccessNotificationManager.notifyAdSkip(this, packageName);
                 }
             } catch (Throwable failure) {
                 logDiagnostic(packageName, "CLICK_VERIFY_ERROR",
