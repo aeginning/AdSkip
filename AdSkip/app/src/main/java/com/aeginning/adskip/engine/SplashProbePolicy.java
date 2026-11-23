@@ -8,12 +8,16 @@ package com.aeginning.adskip.engine;
 public final class SplashProbePolicy {
     public static final int MAX_ATTEMPTS = 5;
     public static final int EXTREME_MAX_ATTEMPTS = 24;
+    public static final int RISK_MAX_ATTEMPTS = 40;
     public static final long INITIAL_DELAY_MS = 650L;
     public static final long RETRY_DELAY_MS = 900L;
     public static final long OCR_INTERVAL_MS = 1_050L;
     public static final long EXTREME_INITIAL_DELAY_MS = 100L;
     public static final long EXTREME_RETRY_DELAY_MS = 160L;
     public static final long EXTREME_OCR_INTERVAL_MS = 160L;
+    public static final long RISK_INITIAL_DELAY_MS = 40L;
+    public static final long RISK_RETRY_DELAY_MS = 60L;
+    public static final long RISK_OCR_INTERVAL_MS = 80L;
     public static final long RESUME_GAP_MS = 30_000L;
 
     private SplashProbePolicy() { }
@@ -27,7 +31,7 @@ public final class SplashProbePolicy {
     }
 
     public static boolean hasMoreAttempts(int completedAttempts, boolean extreme, boolean riskMode) {
-        return completedAttempts < (riskMode ? 32 : extreme ? EXTREME_MAX_ATTEMPTS : MAX_ATTEMPTS);
+        return completedAttempts < (riskMode ? RISK_MAX_ATTEMPTS : extreme ? EXTREME_MAX_ATTEMPTS : MAX_ATTEMPTS);
     }
 
     public static long delayForAttempt(int completedAttempts) {
@@ -39,7 +43,7 @@ public final class SplashProbePolicy {
     }
 
     public static long delayForAttempt(int completedAttempts, boolean extreme, boolean riskMode) {
-        if (riskMode) return completedAttempts <= 0 ? 55L : 90L;
+        if (riskMode) return completedAttempts <= 0 ? RISK_INITIAL_DELAY_MS : RISK_RETRY_DELAY_MS;
         if (extreme) return completedAttempts <= 0
                 ? EXTREME_INITIAL_DELAY_MS : EXTREME_RETRY_DELAY_MS;
         return completedAttempts <= 0 ? INITIAL_DELAY_MS : RETRY_DELAY_MS;
@@ -50,7 +54,7 @@ public final class SplashProbePolicy {
     }
 
     public static long ocrIntervalMs(boolean extreme, boolean riskMode) {
-        return riskMode ? 100L : extreme ? EXTREME_OCR_INTERVAL_MS : OCR_INTERVAL_MS;
+        return riskMode ? RISK_OCR_INTERVAL_MS : extreme ? EXTREME_OCR_INTERVAL_MS : OCR_INTERVAL_MS;
     }
 
     /**

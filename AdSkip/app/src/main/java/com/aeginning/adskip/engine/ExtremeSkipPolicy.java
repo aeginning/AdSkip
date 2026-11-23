@@ -15,7 +15,7 @@ public final class ExtremeSkipPolicy {
     }
 
     public static long eventIntervalMs(boolean extreme, boolean riskMode) {
-        return riskMode ? 45L : extreme ? 70L : 350L;
+        return riskMode ? 30L : extreme ? 70L : 350L;
     }
 
     public static long adOcrIntervalMs(boolean extreme) {
@@ -23,7 +23,7 @@ public final class ExtremeSkipPolicy {
     }
 
     public static long adOcrIntervalMs(boolean extreme, boolean riskMode) {
-        return riskMode ? 110L : extreme ? 170L : 850L;
+        return riskMode ? 85L : extreme ? 170L : 850L;
     }
 
     public static long visualProbeIntervalMs(boolean extreme) {
@@ -31,7 +31,7 @@ public final class ExtremeSkipPolicy {
     }
 
     public static long visualProbeIntervalMs(boolean extreme, boolean riskMode) {
-        return riskMode ? 250L : extreme ? 450L : 7_000L;
+        return riskMode ? 180L : extreme ? 450L : 7_000L;
     }
 
     public static long countdownRescanIntervalMs(boolean extreme) {
@@ -39,7 +39,7 @@ public final class ExtremeSkipPolicy {
     }
 
     public static long countdownRescanIntervalMs(boolean extreme, boolean riskMode) {
-        return riskMode ? 60L : extreme ? 90L : 700L;
+        return riskMode ? 40L : extreme ? 90L : 700L;
     }
 
     public static long confirmationDelayMs(boolean extreme) {
@@ -47,7 +47,7 @@ public final class ExtremeSkipPolicy {
     }
 
     public static long confirmationDelayMs(boolean extreme, boolean riskMode) {
-        return riskMode ? 40L : extreme ? 60L : 260L;
+        return riskMode ? 30L : extreme ? 60L : 260L;
     }
 
     public static int maxCountdownRescans(boolean extreme) {
@@ -55,7 +55,7 @@ public final class ExtremeSkipPolicy {
     }
 
     public static int maxCountdownRescans(boolean extreme, boolean riskMode) {
-        return riskMode ? 128 : extreme ? 96 : 48;
+        return riskMode ? 160 : extreme ? 96 : 48;
     }
 
     public static int minimumSkipScore(int configuredSensitivity, boolean extreme) {

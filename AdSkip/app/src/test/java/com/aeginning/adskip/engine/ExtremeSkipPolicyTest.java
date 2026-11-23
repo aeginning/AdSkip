@@ -27,12 +27,12 @@ public class ExtremeSkipPolicyTest {
     }
 
     @Test public void riskModeUsesAggressiveButBoundedIntervals() {
-        assertEquals(45L, ExtremeSkipPolicy.eventIntervalMs(true, true));
-        assertEquals(110L, ExtremeSkipPolicy.adOcrIntervalMs(true, true));
-        assertEquals(250L, ExtremeSkipPolicy.visualProbeIntervalMs(true, true));
-        assertEquals(60L, ExtremeSkipPolicy.countdownRescanIntervalMs(true, true));
-        assertEquals(40L, ExtremeSkipPolicy.confirmationDelayMs(true, true));
-        assertEquals(128, ExtremeSkipPolicy.maxCountdownRescans(true, true));
+        assertEquals(30L, ExtremeSkipPolicy.eventIntervalMs(true, true));
+        assertEquals(85L, ExtremeSkipPolicy.adOcrIntervalMs(true, true));
+        assertEquals(180L, ExtremeSkipPolicy.visualProbeIntervalMs(true, true));
+        assertEquals(40L, ExtremeSkipPolicy.countdownRescanIntervalMs(true, true));
+        assertEquals(30L, ExtremeSkipPolicy.confirmationDelayMs(true, true));
+        assertEquals(160, ExtremeSkipPolicy.maxCountdownRescans(true, true));
         assertEquals(50, ExtremeSkipPolicy.minimumSkipScore(50, true, true));
     }
 

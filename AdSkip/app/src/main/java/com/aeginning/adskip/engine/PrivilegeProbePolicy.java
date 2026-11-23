@@ -5,7 +5,7 @@ public final class PrivilegeProbePolicy {
     private PrivilegeProbePolicy() { }
 
     public static long intervalMs(boolean extreme, boolean riskMode) {
-        if (riskMode) return 300L;
+        if (riskMode) return 200L;
         if (extreme) return 650L;
         return 1_500L;
     }

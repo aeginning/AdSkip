@@ -3,9 +3,55 @@ package com.aeginning.adskip.engine;
 import java.util.Locale;
 import java.text.Normalizer;
 import java.util.List;
+import java.util.regex.Pattern;
 
 public final class TextMatcher {
     private TextMatcher() { }
+
+    private static final Pattern ZERO_WIDTH_PATTERN = Pattern.compile(
+            "[\\u200B-\\u200D\\u2060\\uFEFF\\uFE0E\\uFE0F]");
+    private static final Pattern FORMAT_CONTROL_PATTERN = Pattern.compile("\\p{Cf}");
+    private static final Pattern WHITESPACE_PATTERN = Pattern.compile("[\\s\\u00a0]+");
+    private static final Pattern CLOSE_GLYPH_DECORATION_PATTERN = Pattern.compile("[\\p{Punct}\\s]");
+    private static final Pattern COMPACT_TEXT_PATTERN =
+            Pattern.compile("[\\s\\p{Punct}，。！？、；：]");
+    private static final Pattern AD_WORD_PATTERN = Pattern.compile("\\bad\\b");
+    private static final String COUNTDOWN_UNITS =
+            "(?:seconds?|secs?|s|segundos?|seg|seconde?s?|sekunden?|sekund(?:e|en)?|"
+                    + "секунд(?:а|ы|у)?|ثواني|ثانية|秒|초)";
+    private static final Pattern COUNTDOWN_CLOCK_PATTERN =
+            Pattern.compile("\\d{1,2}\\s*[:：]\\s*\\d{1,2}");
+    private static final Pattern COUNTDOWN_PREFIX_PATTERN = Pattern.compile(
+            "(?i)(skip(?:\\s+(?:in|after))?|跳过|スキップ|건너뛰기"
+                    + "|omitir(?:\\s+en)?|saltar(?:\\s+en)?|ignorer(?:\\s+dans)?"
+                    + "|überspringen(?:\\s+nach)?|пропустить(?:\\s+через)?|تخطي(?:\\s+بعد)?)"
+                    + "\\s*\\d+\\s*" + COUNTDOWN_UNITS + "?");
+    private static final Pattern COUNTDOWN_NUMBER_SUFFIX_PATTERN =
+            Pattern.compile("\\d+\\s*" + COUNTDOWN_UNITS);
+    private static final Pattern COUNTDOWN_WITH_DURATION_PATTERN =
+            Pattern.compile(".*\\d+\\s*(?:s|sec|seconds|秒|초).*");
+
+    private static final Pattern[] COUNTDOWN_PATTERNS = {
+            Pattern.compile(".*\\bskip\\s+(?:in|after)\\s+\\d+.*"),
+            Pattern.compile(".*skip\\s+(?:in|after)\\s+\\d{1,2}[:：]\\d{2}.*"),
+            Pattern.compile(".*\\b\\d+\\s*(?:s|sec|secs|second|seconds)\\s+(?:to\\s+)?skip.*"),
+            Pattern.compile(".*\\d+\\s*(?:秒|s|sec|second|seconds)\\s*后?(?:可)?\\s*跳过.*"),
+            Pattern.compile(".*(?:跳过|skip)\\s*\\d+\\s*(?:秒|s|sec|secs|second|seconds)?(?:\\s|$|[,，。.!！?？]).*"),
+            Pattern.compile(".*\\d+\\s*秒后(?:可)?跳过.*"),
+            Pattern.compile(".*(?:あと\\s*\\d+\\s*秒|\\d+\\s*秒後にスキップ|スキップ\\s*\\d+).*"),
+            Pattern.compile(".*(?:\\d+\\s*초\\s*후\\s*건너뛰기|건너뛰기\\s*\\d+).*"),
+            Pattern.compile(".*(?:omitir|saltar|ignorer|überspringen|пропустить|تخطي)\\s*(?:en|dans|nach|через|after|بعد)?\\s*\\d+.*")
+    };
+
+    private static final Pattern[] COUNTDOWN_SKIP_LABEL_PATTERNS = {
+            Pattern.compile(".*(?:跳过|skip(?:\\s+(?:in|after))?|スキップ|건너뛰기|omitir|saltar|ignorer|überspringen|пропустить|تخطي)(?:\\s+(?:en|dans|nach|через|بعد))?\\s*\\d+.*"),
+            Pattern.compile(".*skip\\s+(?:in|after)\\s+\\d{1,2}[:：]\\d{2}.*"),
+            Pattern.compile(".*\\bskip\\s+(?:in|after)\\s+\\d+.*"),
+            Pattern.compile(".*\\d+\\s*(?:秒|s|sec|secs|second|seconds)\\s*(?:后|to)?\\s*(?:跳过|skip).*"),
+            Pattern.compile(".*あと\\s*\\d+\\s*秒.*"),
+            Pattern.compile(".*\\d+\\s*秒後にスキップ.*"),
+            Pattern.compile(".*\\d+\\s*초\\s*후\\s*건너뛰기.*")
+    };
 
     private static final String[] NEGATIVE_SKIP = {
             "don't skip", "don’t skip", "dont skip", "do not skip", "never skip",
@@ -89,9 +135,12 @@ public final class TextMatcher {
 
     /** Custom phrases are positive hints only; negative and dangerous labels can never match. */
     public static boolean isCustomSkipPhrase(String text, List<String> customWords) {
-        String value = normalize(text);
-        if (value.isEmpty() || isNegativeSkip(value) || isDangerous(value)
-                || isCloseGlyph(value)) return false;
+        return isCustomSkipPhraseNormalized(normalize(text), customWords);
+    }
+
+    static boolean isCustomSkipPhraseNormalized(String value, List<String> customWords) {
+        if (value.isEmpty() || isNegativeSkipNormalized(value)
+                || isDangerousNormalized(value) || isCloseGlyphNormalized(value)) return false;
         return SkipWordLibrary.matches(value, customWords);
     }
 
@@ -107,84 +156,109 @@ public final class TextMatcher {
     }
 
     public static boolean isExplicitSkipAd(String text) {
-        return containsAny(normalize(text), EXPLICIT_SKIP_AD);
+        return isExplicitSkipAdNormalized(normalize(text));
+    }
+
+    static boolean isExplicitSkipAdNormalized(String value) {
+        return containsAny(value, EXPLICIT_SKIP_AD);
     }
 
     public static boolean isExplicitCloseAd(String text) {
-        return containsAny(normalize(text), EXPLICIT_CLOSE_AD);
+        return isExplicitCloseAdNormalized(normalize(text));
+    }
+
+    static boolean isExplicitCloseAdNormalized(String value) {
+        return containsAny(value, EXPLICIT_CLOSE_AD);
     }
 
     /** Exact visual close glyphs commonly used by splash ads. Geometry and ad context
      * are verified separately by SafetyPolicy before any action is allowed. */
     public static boolean isCloseGlyph(String text) {
-        String value = normalize(text).replaceAll("[\\p{Punct}\\s]", "");
-        // Common Latin and Unicode close glyphs used by splash/video ad SDKs.
-        // The caller still requires ad context and conservative top-right geometry.
-        return value.equals("x") || value.equals("×") || value.equals("✕")
-                || value.equals("✖") || value.equals("✗") || value.equals("✘")
-                || value.equals("╳") || value.equals("⨯") || value.equals("☓")
-                || value.equals("❎") || value.equals("❌");
+        return isCloseGlyphNormalized(normalize(text));
+    }
+
+    static boolean isCloseGlyphNormalized(String value) {
+        String compact = CLOSE_GLYPH_DECORATION_PATTERN.matcher(value).replaceAll("");
+        return compact.equals("x") || compact.equals("×") || compact.equals("✕")
+                || compact.equals("✖") || compact.equals("✗") || compact.equals("✘")
+                || compact.equals("╳") || compact.equals("⨯") || compact.equals("☓")
+                || compact.equals("❎") || compact.equals("❌");
     }
 
 
     private static boolean containsAny(String value, String[] tokens) {
         for (String token : tokens) {
-            if (value.contains(normalize(token))) return true;
+            if (value.contains(token)) return true;
         }
         return false;
     }
 
     public static boolean hasAdContext(String screenText) {
-        String text = normalize(screenText);
-        for (String token : AD_CONTEXT) if (text.contains(normalize(token))) return true;
-        return text.matches(".*\\bad\\b.*");
+        return hasAdContextNormalized(normalize(screenText));
     }
+
+    static boolean hasAdContextNormalized(String text) {
+        for (String token : AD_CONTEXT) if (text.contains(token)) return true;
+        return AD_WORD_PATTERN.matcher(text).find();
+    }
+
 
     /** Reject negated or unavailable skip labels before substring matching can authorize them. */
     public static boolean isNegativeSkip(String text) {
-        String value = normalize(text);
+        return isNegativeSkipNormalized(normalize(text));
+    }
+
+    static boolean isNegativeSkipNormalized(String value) {
         for (String token : NEGATIVE_SKIP) {
-            if (value.contains(normalize(token))) return true;
+            if (value.contains(token)) return true;
         }
         return false;
     }
 
+
     public static boolean isDangerous(String text) {
-        String value = normalize(text);
-        for (String token : DANGEROUS) if (value.contains(normalize(token))) return true;
+        return isDangerousNormalized(normalize(text));
+    }
+
+    static boolean isDangerousNormalized(String value) {
+        for (String token : DANGEROUS) if (value.contains(token)) return true;
         return false;
     }
 
+
     /** Returns true when the surrounding screen contains any purchase, permission or account flow. */
     public static boolean hasCriticalActionContext(String text) {
-        return containsAny(normalize(text), CRITICAL_ACTION_CONTEXT);
+        return hasCriticalActionContextNormalized(normalize(text));
+    }
+
+    static boolean hasCriticalActionContextNormalized(String value) {
+        return containsAny(value, CRITICAL_ACTION_CONTEXT);
     }
 
     public static boolean isCountdown(String text) {
-        String value = normalize(text);
-        return value.matches(".*\\bskip\\s+(?:in|after)\\s+\\d+.*")
-                || value.matches(".*skip\\s+(?:in|after)\\s+\\d{1,2}[:：]\\d{2}.*")
-                || value.matches(".*\\b\\d+\\s*(?:s|sec|secs|second|seconds)\\s+(?:to\\s+)?skip.*")
-                || value.matches(".*\\d+\\s*(?:秒|s|sec|second|seconds)\\s*后?(?:可)?\\s*跳过.*")
-                || value.matches(".*(?:跳过|skip)\\s*\\d+\\s*(?:秒|s|sec|secs|second|seconds)?(?:\\s|$|[,，。.!！?？]).*")
-                || value.matches(".*\\d+\\s*秒后(?:可)?跳过.*")
-                || value.matches(".*(?:あと\\s*\\d+\\s*秒|\\d+\\s*秒後にスキップ|スキップ\\s*\\d+).*")
-                || value.matches(".*(?:\\d+\\s*초\\s*후\\s*건너뛰기|건너뛰기\\s*\\d+).*")
-                || value.matches(".*(?:omitir|saltar|ignorer|überspringen|пропустить|تخطي)\\s*(?:en|dans|nach|через|after|بعد)?\\s*\\d+.*")
-                || (hasAdContext(value) && value.matches(".*\\d+\\s*(?:s|sec|seconds|秒|초).*"));
+        return isCountdownNormalized(normalize(text));
     }
+
+    static boolean isCountdownNormalized(String value) {
+        for (Pattern pattern : COUNTDOWN_PATTERNS) {
+            if (pattern.matcher(value).matches()) return true;
+        }
+        return hasAdContextNormalized(value) && COUNTDOWN_WITH_DURATION_PATTERN.matcher(value).matches();
+    }
+
 
     /** True only for a visible skip control whose label contains a changing countdown value. */
     public static boolean isCountdownSkipLabel(String text) {
-        String value = normalize(text);
-        return value.matches(".*(?:跳过|skip(?:\\s+(?:in|after))?|スキップ|건너뛰기|omitir|saltar|ignorer|überspringen|пропустить|تخطي)(?:\\s+(?:en|dans|nach|через|بعد))?\\s*\\d+.*")
-                || value.matches(".*skip\\s+(?:in|after)\\s+\\d{1,2}[:：]\\d{2}.*")
-                || value.matches(".*\\bskip\\s+(?:in|after)\\s+\\d+.*")
-                || value.matches(".*\\d+\\s*(?:秒|s|sec|secs|second|seconds)\\s*(?:后|to)?\\s*(?:跳过|skip).*")
-                || value.matches(".*あと\\s*\\d+\\s*秒.*")
-                || value.matches(".*\\d+\\s*秒後にスキップ.*")
-                || value.matches(".*\\d+\\s*초\\s*후\\s*건너뛰기.*");
+        return isCountdownSkipLabelNormalized(normalize(text));
     }
+
+    static boolean isCountdownSkipLabelNormalized(String value) {
+        for (Pattern pattern : COUNTDOWN_SKIP_LABEL_PATTERNS) {
+            if (pattern.matcher(value).matches()) return true;
+        }
+        return false;
+    }
+
 
     /**
      * Similarity used only to compare two observations of the same candidate.
@@ -222,38 +296,28 @@ public final class TextMatcher {
                 Math.round((1f - distance / (float) length) * 100f)));
 
         // OCR may insert/remove harmless whitespace or punctuation around short controls.
-        String compactA = a.replaceAll("[\\s\\p{Punct}，。！？、；：]", "");
-        String compactB = b.replaceAll("[\\s\\p{Punct}，。！？、；：]", "");
+        String compactA = COMPACT_TEXT_PATTERN.matcher(a).replaceAll("");
+        String compactB = COMPACT_TEXT_PATTERN.matcher(b).replaceAll("");
         if (!compactA.isEmpty() && compactA.equals(compactB)) return 100;
         return editSimilarity;
     }
 
     private static String stripDynamicCountdown(String value) {
-        if (!isCountdown(value) && !isCountdownSkipLabel(value)) return value;
-        String normalized = value.replaceAll("\\d{1,2}\\s*[:：]\\s*\\d{1,2}", " ");
-        // Normalize changing skip labels across English, Chinese, Japanese, Korean,
-        // Spanish, French, German, Russian and Arabic.
-        String units = "(?:seconds?|secs?|s|segundos?|seg|seconde?s?|sekunden?|sekund(?:e|en)?|"
-                + "секунд(?:а|ы|у)?|ثواني|ثانية|秒|초)";
-        normalized = normalized.replaceAll(
-                "(?i)(skip(?:\\s+(?:in|after))?|跳过|スキップ|건너뛰기"
-                        + "|omitir(?:\\s+en)?|saltar(?:\\s+en)?|ignorer(?:\\s+dans)?"
-                        + "|überspringen(?:\\s+nach)?|пропустить(?:\\s+через)?|تخطي(?:\\s+بعد)?)"
-                        + "\\s*\\d+\\s*" + units + "?",
-                "$1");
-        // Also remove a number-unit suffix when the language puts the number first
-        // (for example, "3 seconds to skip", "3秒後にスキップ").
-        normalized = normalized.replaceAll("\\d+\\s*" + units, " ");
-        return normalized.replaceAll("\\s+", " ").trim();
+        if (!isCountdownNormalized(value) && !isCountdownSkipLabelNormalized(value)) return value;
+        String normalized = COUNTDOWN_CLOCK_PATTERN.matcher(value).replaceAll(" ");
+        normalized = COUNTDOWN_PREFIX_PATTERN.matcher(normalized).replaceAll("$1");
+        normalized = COUNTDOWN_NUMBER_SUFFIX_PATTERN.matcher(normalized).replaceAll(" ");
+        return WHITESPACE_PATTERN.matcher(normalized).replaceAll(" ").trim();
     }
+
 
     public static String normalize(String input) {
         if (input == null) return "";
         String compatibility = Normalizer.normalize(input, Normalizer.Form.NFKC);
-        // Remove zero-width and Unicode formatting controls often injected by ad SDK labels.
-        compatibility = compatibility.replaceAll("[\\u200B-\\u200D\\u2060\\uFEFF\\uFE0E\\uFE0F]", "")
-                .replaceAll("\\p{Cf}", "");
-        return compatibility.toLowerCase(Locale.ROOT)
-                .replaceAll("[\\s\\u00a0]+", " ").trim();
+        compatibility = ZERO_WIDTH_PATTERN.matcher(compatibility).replaceAll("");
+        compatibility = FORMAT_CONTROL_PATTERN.matcher(compatibility).replaceAll("");
+        return WHITESPACE_PATTERN.matcher(compatibility.toLowerCase(Locale.ROOT))
+                .replaceAll(" ").trim();
     }
+
 }
