@@ -364,7 +364,7 @@ public final class MainActivity extends Activity {
         recognitionCard.addView(recognitionHint);
 
         android.widget.Switch extremeModeSwitch = new android.widget.Switch(this);
-        extremeModeSwitch.setText("开启极速识别模式（高频扫描 / OCR）");
+        extremeModeSwitch.setText(R.string.extreme_skip_mode_label);
         extremeModeSwitch.setTextSize(14);
         extremeModeSwitch.setTextColor(0xFF344054);
         extremeModeSwitch.setPadding(0, dp(8), 0, dp(4));
@@ -398,7 +398,7 @@ public final class MainActivity extends Activity {
         riskModeSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
                 .getBoolean("risk_mode_enabled", false));
         riskModeSwitch.setContentDescription(
-                "风险模式：更高频扫描、更快 OCR、更多有限开屏探测轮次；不会关闭应用白名单、窗口核验、敏感区域或购买安装授权等高风险操作拦截");
+                "风险模式：事件扫描约 30ms、广告 OCR 触发间隔约 85ms、倒计时重扫约 40ms、开屏首轮探测约 40ms、Shizuku 前台观察约 200ms。识别队列始终单任务、仅保留最新等待请求；应用白名单、窗口核验、敏感区域及购买安装授权等高风险操作拦截始终生效");
         riskModeSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
             getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
                     .putBoolean("risk_mode_enabled", checked)
@@ -420,7 +420,7 @@ public final class MainActivity extends Activity {
         addGap(recognitionCard, 4);
         recognitionCard.addView(riskModeSwitch);
         TextView riskModeHint = label(
-                "风险模式将事件扫描提高至约 45ms、广告 OCR 触发间隔约 110ms、倒计时重扫约 60ms、开屏首次探测约 55ms；Shizuku 前台观察约 300ms。识别请求仍使用单任务 + 最新请求队列，不会并发堆积。为防止误购、误安装或误授权，应用白名单、实时窗口一致性、敏感输入区域、高风险操作词和点击冷却不可关闭。",
+                "风险模式将事件扫描提高至约 30ms、广告 OCR 触发间隔约 85ms、倒计时重扫约 40ms、二次确认等待约 30ms、开屏首轮探测约 40ms、后续约 60ms，最多 40 轮；Shizuku 前台观察约 200ms。OCR 仍为单任务 + 最新请求队列，不会并发堆积。为防止误购、误安装或误授权，应用白名单、实时窗口一致性、敏感输入区域、高风险操作词和点击冷却不可关闭。耗电与发热可能明显增加。",
                 11, 0xFF8A4B08, false);
         riskModeHint.setLineSpacing(dp(3), 1.0f);
         addGap(recognitionCard, 2);
@@ -692,7 +692,11 @@ public final class MainActivity extends Activity {
 
     private void showChangelogDialog() {
         String changelog =
-                "AdSkip " + getAppVersionName() + " · Shizuku 前台探测与状态稳定性修复\n\n"
+                "AdSkip " + getAppVersionName() + " · 极限识别热路径优化\\n\\n"
+                + "• 风险模式继续提速：事件扫描约 30ms、广告 OCR 触发约 85ms、倒计时重扫约 40ms、二次确认约 30ms、开屏探测首轮约 40ms；Shizuku 前台探测约 200ms。所有循环均有次数上限。\\n"
+                + "• 优化控件树候选排序：每个子节点只计算一次优先级，叶子节点不再创建空列表，减少 Accessibility 跨进程读取与短命对象。\\n"
+                + "• 文字匹配预编译倒计时、广告上下文、零宽字符和空白正则；候选评分复用已归一化的文字与页面上下文。\\n"
+                + "• 点击前再次核验最新误判屏蔽规则；修复并清理 1.4.1 的 3 条 Android Lint Warning。所有原功能与安全硬拦截保留。\\n\\n"                "AdSkip " + getAppVersionName() + " · Shizuku 前台探测与状态稳定性修复\n\n"
                 + "• 修复目标应用已在前台时后来加入白名单，Shizuku 不会立即触发快速识别的问题。\n"
                 + "• 无法解析 top-resumed 前台应用时自动降低轮询频率，避免不兼容 ROM 持续高频执行 dumpsys。\n"
                 + "• 多窗口场景优先读取 topResumedActivity，并对悬浮窗识别状态更新去重。\n"
@@ -1447,7 +1451,8 @@ public final class MainActivity extends Activity {
 
     private void refreshCustomSkipWordList(LinearLayout list, TextView summary, List<String> words) {
         list.removeAllViews();
-        summary.setText("已保存 " + words.size() + " / " + SkipWordLibrary.MAX_CUSTOM_WORDS + " 条");
+        summary.setText(getString(R.string.custom_skip_words_count,
+                words.size(), SkipWordLibrary.MAX_CUSTOM_WORDS));
         if (words.isEmpty()) {
             TextView empty = label("暂无自定义词条。默认词库仍会正常工作。", 12, 0xFF98A2B3, false);
             empty.setPadding(0, dp(5), 0, dp(5));
