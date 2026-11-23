@@ -1128,7 +1128,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             if (currentWindowId >= 0) activeWindowId = currentWindowId;
             logDiagnostic(packageName, "PRIVILEGED_FOREGROUND_DETECTED",
                     "Shizuku 检测到已启用应用位于 resumed 前台，且与实时无障碍窗口一致；启动快速探测");
-            scheduleSplashProbe(packageName, windowGeneration);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                scheduleSplashProbe(packageName, windowGeneration);
+            } else {
+                logDiagnostic(packageName, "PRIVILEGED_TREE_ONLY",
+                        "当前 Android 版本不支持截图 OCR；继续使用无障碍控件树识别");
+            }
         } finally {
             recycleNode(root);
         }
