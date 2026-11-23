@@ -76,6 +76,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private Runnable pendingForegroundProbe;
     private volatile boolean foregroundProbeInFlight;
     private String lastPrivilegedForegroundPackage = "";
+    private boolean lastPrivilegedForegroundWasEnabled;
+    private final Object recognitionStateLock = new Object();
+    private String lastQueuedRecognitionState = "";
     private SharedPreferences overlayPreferences;
     private SharedPreferences.OnSharedPreferenceChangeListener overlayPreferenceListener;
     private TextRecognizer chineseRecognizer;
@@ -1010,11 +1013,17 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void updateRecognitionState(String state) {
         if (state == null || state.trim().isEmpty()) return;
-        mainHandler.post(() -> {
-            if (!destroyed && floatingStatusOverlay != null) {
-                floatingStatusOverlay.setRecognitionState(state);
-            }
-        });
+        synchronized (recognitionStateLock) {
+            if (!RecognitionStatusPolicy.shouldUpdate(lastQueuedRecognitionState, state)) return;
+            lastQueuedRecognitionState = state;
+            // Avoid posting one main-thread Runnable for every 45ms scan event when
+            // the visible state has not changed. Keep queue order for real transitions.
+            mainHandler.post(() -> {
+                if (!destroyed && floatingStatusOverlay != null) {
+                    floatingStatusOverlay.setRecognitionState(state);
+                }
+            });
+        }
     }
 
     /** Poll the top-resumed package through Shizuku only after an existing user grant. */
@@ -1068,8 +1077,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     } else if (!resultPackage.isEmpty()) {
                         handlePrivilegedForegroundPackage(resultPackage);
                     }
-                    scheduleForegroundProbe(PrivilegeProbePolicy.intervalMs(
-                            isExtremeSkipMode(), isRiskModeEnabled()));
+                    boolean foregroundResolved = resultFailure.isEmpty() && !resultPackage.isEmpty();
+                    scheduleForegroundProbe(PrivilegeProbePolicy.nextIntervalMs(
+                            foregroundResolved, isExtremeSkipMode(), isRiskModeEnabled()));
                 });
             });
         } catch (RuntimeException rejected) {
@@ -1082,12 +1092,17 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void handlePrivilegedForegroundPackage(String packageName) {
         if (packageName == null || packageName.trim().isEmpty()) return;
-        if (packageName.equals(lastPrivilegedForegroundPackage)) return;
-        if (packageName.equals(getPackageName()) || database == null
-                || !database.isAppEnabled(packageName)) {
-            // Remember non-target foreground packages so returning to an enabled app
-            // is treated as a fresh launch and gets an immediate probe.
+        boolean appEnabled = database != null && database.isAppEnabled(packageName);
+        if (!PrivilegeProbePolicy.shouldProbeForeground(
+                lastPrivilegedForegroundPackage, lastPrivilegedForegroundWasEnabled,
+                packageName, appEnabled, getPackageName())) {
+            return;
+        }
+        if (packageName.equals(getPackageName()) || database == null || !appEnabled) {
+            // Remember the disabled state too. If the user enables this same app while
+            // it stays in the foreground, the policy detects false -> true and probes it.
             lastPrivilegedForegroundPackage = packageName;
+            lastPrivilegedForegroundWasEnabled = appEnabled;
             return;
         }
         AccessibilityNodeInfo root = null;
@@ -1111,6 +1126,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 return;
             }
             lastPrivilegedForegroundPackage = packageName;
+            lastPrivilegedForegroundWasEnabled = true;
             CharSequence classNameValue = root.getClassName();
             String currentClass = classNameValue == null ? "" : classNameValue.toString();
             int currentWindowId = root.getWindowId();
