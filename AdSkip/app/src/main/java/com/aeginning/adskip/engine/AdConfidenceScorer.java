@@ -93,7 +93,8 @@ public final class AdConfidenceScorer {
             score = 70;
         } else if (TextMatcher.isExplicitCloseAd(candidate)) {
             score = 66;
-        } else if (allowTopRightSkipFallback && TextMatcher.isGenericSkipLabel(candidate)) {
+        } else if (allowTopRightSkipFallback && !adContext
+                && TextMatcher.isGenericSkipLabel(candidate)) {
             // Layout was independently checked by SkipLayoutPolicy in the caller.
             // This remains below the default score floor and requires extreme mode.
             score = 54;
