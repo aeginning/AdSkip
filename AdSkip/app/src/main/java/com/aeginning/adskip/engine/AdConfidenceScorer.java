@@ -93,6 +93,10 @@ public final class AdConfidenceScorer {
             score = 70;
         } else if (TextMatcher.isExplicitCloseAd(candidate)) {
             score = 66;
+        } else if (allowTopRightSkipFallback && TextMatcher.isGenericSkipLabel(candidate)) {
+            // Layout was independently checked by SkipLayoutPolicy in the caller.
+            // This remains below the default score floor and requires extreme mode.
+            score = 54;
         } else if (TextMatcher.isCustomSkipPhrase(candidate, customSkipWords)) {
             if (!adContext) return result(0, "自定义跳过词缺少广告上下文");
             // Custom terms can enter review, never the highest-confidence built-in tier.
