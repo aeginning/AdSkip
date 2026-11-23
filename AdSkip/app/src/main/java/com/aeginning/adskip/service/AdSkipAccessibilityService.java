@@ -1870,26 +1870,18 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void refreshHomePackages() {
         homePackages.clear();
-        List<ResolveInfo> homes = new ArrayList<>();
         try {
-            getPackageManager().getHomeActivities(homes);
+            Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+            homeIntent.addCategory(Intent.CATEGORY_HOME);
+            List<ResolveInfo> homes = getPackageManager().queryIntentActivities(homeIntent, 0);
+            for (ResolveInfo resolveInfo : homes) {
+                if (resolveInfo != null && resolveInfo.activityInfo != null
+                        && resolveInfo.activityInfo.packageName != null) {
+                    homePackages.add(resolveInfo.activityInfo.packageName);
+                }
+            }
         } catch (RuntimeException ignored) {
-            // Fall back to a targeted HOME intent query below.
-        }
-        if (homes.isEmpty()) {
-            try {
-                Intent homeIntent = new Intent(Intent.ACTION_MAIN);
-                homeIntent.addCategory(Intent.CATEGORY_HOME);
-                homes = getPackageManager().queryIntentActivities(homeIntent, 0);
-            } catch (RuntimeException ignored) {
-                // If the launcher cannot be identified, user-launch mode stays fail-closed.
-            }
-        }
-        for (ResolveInfo resolveInfo : homes) {
-            if (resolveInfo != null && resolveInfo.activityInfo != null
-                    && resolveInfo.activityInfo.packageName != null) {
-                homePackages.add(resolveInfo.activityInfo.packageName);
-            }
+            // If the launcher cannot be identified, user-launch mode stays fail-closed.
         }
         if (homePackages.isEmpty()) {
             logDiagnostic("", "HOME_PACKAGE_DISCOVERY_FAILED",
