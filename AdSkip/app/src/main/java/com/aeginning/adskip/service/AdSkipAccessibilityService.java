@@ -798,7 +798,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
      */
     private void scheduleCountdownRescan(String packageName, long generation) {
         if (destroyed || database == null || packageName == null
-                || generation != windowGeneration || !database.isAppEnabled(packageName)) return;
+                || generation != windowGeneration || !isTargetPackageEligible(packageName)) return;
         cancelPendingSplashProbe();
         if (!packageName.equals(countdownRescanPackage)) {
             cancelPendingCountdownRescan();
@@ -907,7 +907,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private void scheduleSplashProbe(String packageName, long generation) {
         if (destroyed || database == null
                 || packageName == null || packageName.trim().isEmpty()
-                || generation != windowGeneration || !database.isAppEnabled(packageName)
+                || generation != windowGeneration || !isTargetPackageEligible(packageName)
                 || !isOcrEnabled()) return;
         if (!packageName.equals(splashProbePackage)) {
             cancelPendingSplashProbe();
@@ -1177,6 +1177,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void handlePrivilegedForegroundPackage(String packageName) {
         if (packageName == null || packageName.trim().isEmpty()) return;
+        if (!isTargetPackageEligible(packageName)) {
+            lastPrivilegedForegroundPackage = packageName;
+            lastPrivilegedForegroundWasEnabled = false;
+            return;
+        }
         boolean appEnabled = database != null && database.isAppEnabled(packageName);
         if (!PrivilegeProbePolicy.shouldProbeForeground(
                 lastPrivilegedForegroundPackage, lastPrivilegedForegroundWasEnabled,
@@ -1242,8 +1247,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void executeNodeCandidate(Candidate candidate, String packageName, String context,
                                        long generation) {
-        if (destroyed || generation != windowGeneration || database == null
-                || !database.isAppEnabled(packageName)) {
+        if (destroyed || generation != windowGeneration || !isTargetPackageEligible(packageName)) {
             logDiagnostic(packageName, "CLICK_REVALIDATION_FAILED",
                     "点击前应用开关或窗口代次已变化；候选已作废");
             return;
@@ -1303,7 +1307,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         final Rect expectedBounds = new Rect(clickedBounds);
         final String expectedLabel = label == null ? "" : label;
         mainHandler.postDelayed(() -> {
-            if (destroyed || database == null) return;
+            if (destroyed || database == null || !isTargetPackageEligible(packageName)) return;
             AccessibilityNodeInfo root = getRootInActiveWindow();
             if (root == null) {
                 logDiagnostic(packageName, "CLICK_VERIFY_UNKNOWN",
@@ -1380,7 +1384,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe,
                              long generation, String treeContext, boolean splashProbe) {
-        if (destroyed || expectedPackage == null || expectedPackage.trim().isEmpty()) return;
+        if (destroyed || expectedPackage == null || expectedPackage.trim().isEmpty()
+                || !isTargetPackageEligible(expectedPackage)) return;
         if (hasSensitiveInputInCurrentWindow) {
             logDiagnostic(expectedPackage, "OCR_BLOCKED_SENSITIVE",
                     "当前窗口存在敏感输入区域，已禁止截图 OCR");
@@ -1529,9 +1534,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     "待处理 OCR 请求所属窗口会话已变化；已丢弃，不会使用旧截图或旧候选");
             return;
         }
-        if (!database.isAppEnabled(pending.expectedPackage)) {
+        if (!isTargetPackageEligible(pending.expectedPackage)) {
             logDiagnostic(pending.expectedPackage, "OCR_QUEUE_APP_DISABLED",
-                    "待处理 OCR 请求执行前发现目标应用已关闭自动化；已丢弃");
+                    "待处理 OCR 请求执行前发现目标应用已不在扫描许可范围；已丢弃");
             return;
         }
         long waited = Math.max(0L, SystemClock.elapsedRealtime() - pending.queuedAt);
@@ -2068,6 +2073,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void executeOcrCandidate(OcrCandidate candidate, String context, int bitmapWidth, int bitmapHeight,
                                      String expectedPackage, long generation) {
+        if (!isTargetPackageEligible(expectedPackage)) {
+            logDiagnostic(expectedPackage, "OCR_PACKAGE_EXCLUDED",
+                    "目标包不属于已启用的用户应用扫描范围；OCR 候选已作废");
+            return;
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             logDiagnostic(expectedPackage, "OCR_UNAVAILABLE", "Android 11 以下不支持当前截图 OCR 路径");
             return;
@@ -2173,6 +2183,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void confirmOcrCandidate(String expectedLabel, Rect firstBounds,
                                      String expectedPackage, long generation, int firstScore) {
+        if (!isTargetPackageEligible(expectedPackage)) return;
         if (!tryBeginOcrWork(expectedPackage)) {
             logDiagnostic(expectedPackage, "OCR_CONFIRM_BUSY", "另一轮 OCR 正在执行；本次二次确认已安全取消，避免并发截图");
             return;
@@ -2442,6 +2453,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private boolean isNodeTargetSafe(String expectedPackage, long generation, Rect targetBounds) {
+        if (!isTargetPackageEligible(expectedPackage)) {
+            logDiagnostic(expectedPackage, "CLICK_PACKAGE_EXCLUDED", "目标应用不再满足前台扫描许可条件");
+            return false;
+        }
         if (destroyed || generation != windowGeneration || targetBounds == null) {
             logDiagnostic(expectedPackage, "WINDOW_STALE", "节点候选复核时窗口代次已失效或目标区域为空");
             return false;
@@ -2520,6 +2535,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private boolean isActiveWindowSafeForTarget(String expectedPackage, long generation) {
+        if (!isTargetPackageEligible(expectedPackage)) {
+            logDiagnostic(expectedPackage, "WINDOW_PACKAGE_EXCLUDED", "目标应用不再属于当前允许扫描范围");
+            return false;
+        }
         if (destroyed || generation != windowGeneration) {
             logDiagnostic(expectedPackage, "WINDOW_STALE", "待执行动作对应的窗口代次已失效");
             return false;
