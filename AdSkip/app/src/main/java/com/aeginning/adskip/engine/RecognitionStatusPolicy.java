@@ -7,7 +7,8 @@ public final class RecognitionStatusPolicy {
     public static String fromDiagnostic(String action) {
         if (action == null) return null;
         switch (action) {
-            case "SCAN": return "正在扫描";
+            case "SCAN":
+            case "PRIVILEGED_FOREGROUND_DETECTED": return "正在扫描";
             case "OCR_START": return "正在识别（OCR）";
             case "OCR_QUEUED":
             case "OCR_QUEUE_REPLACED":
@@ -32,6 +33,7 @@ public final class RecognitionStatusPolicy {
             case "OCR_NO_CANDIDATE": return "未发现可用跳过按钮";
             case "OCR_ERROR":
             case "SCAN_ERROR": return "识别异常";
+            case "OCR_COUNTDOWN_WAIT": return "等待广告倒计时";
             case "OCR_DISABLED": return "OCR 已关闭";
             case "SERVICE_CONNECTED": return "服务已连接 · 等待目标应用";
             default: return null;
