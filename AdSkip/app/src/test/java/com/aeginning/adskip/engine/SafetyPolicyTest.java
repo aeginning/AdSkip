@@ -23,7 +23,7 @@ public class SafetyPolicyTest {
                 TextMatcher.normalize("正在播放广告")));
 
         assertTrue(SafetyPolicy.isSafeTarget(
-                new Rect(760, 800, 900, 850), SCREEN_WIDTH, SCREEN_HEIGHT,
+                new TestRect(760, 800, 900, 850), SCREEN_WIDTH, SCREEN_HEIGHT,
                 true, true, true, "跳过广告", "正在播放广告",
                 false, 75, Collections.emptyList(), false, assessment));
     }
@@ -32,7 +32,7 @@ public class SafetyPolicyTest {
         AdConfidenceScorer.Assessment forged = new AdConfidenceScorer.Assessment(
                 100, AdConfidenceScorer.Level.HIGH, "test-only assessment");
         assertFalse(SafetyPolicy.isSafeTarget(
-                new Rect(760, 100, 900, 150), SCREEN_WIDTH, SCREEN_HEIGHT,
+                new TestRect(760, 100, 900, 150), SCREEN_WIDTH, SCREEN_HEIGHT,
                 true, true, true, "立即购买", "广告",
                 false, 50, Collections.emptyList(), false, forged));
     }
@@ -41,7 +41,7 @@ public class SafetyPolicyTest {
         AdConfidenceScorer.Assessment forged = new AdConfidenceScorer.Assessment(
                 100, AdConfidenceScorer.Level.HIGH, "test-only assessment");
         assertFalse(SafetyPolicy.isSafeTarget(
-                new Rect(760, 100, 900, 150), SCREEN_WIDTH, SCREEN_HEIGHT,
+                new TestRect(760, 100, 900, 150), SCREEN_WIDTH, SCREEN_HEIGHT,
                 true, true, true, "跳过广告", "广告 · 确认购买",
                 false, 50, Collections.emptyList(), false, forged));
     }
@@ -50,8 +50,24 @@ public class SafetyPolicyTest {
         AdConfidenceScorer.Assessment forged = new AdConfidenceScorer.Assessment(
                 100, AdConfidenceScorer.Level.HIGH, "test-only assessment");
         assertFalse(SafetyPolicy.isSafeTarget(
-                new Rect(760, 2350, 900, 2390), SCREEN_WIDTH, SCREEN_HEIGHT,
+                new TestRect(760, 2350, 900, 2390), SCREEN_WIDTH, SCREEN_HEIGHT,
                 true, true, true, "跳过广告", "正在播放广告",
                 false, 50, Collections.emptyList(), false, forged));
     }
+    /** Android framework Rect methods are stubbed in local JVM unit tests. */
+    private static final class TestRect extends Rect {
+        TestRect(int left, int top, int right, int bottom) {
+            this.left = left;
+            this.top = top;
+            this.right = right;
+            this.bottom = bottom;
+        }
+
+        @Override public boolean isEmpty() { return right <= left || bottom <= top; }
+        @Override public int width() { return right - left; }
+        @Override public int height() { return bottom - top; }
+        @Override public int centerX() { return left + (right - left) / 2; }
+        @Override public int centerY() { return top + (bottom - top) / 2; }
+    }
+
 }
