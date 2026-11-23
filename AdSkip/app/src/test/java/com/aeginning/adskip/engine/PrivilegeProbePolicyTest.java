@@ -38,8 +38,10 @@ public class PrivilegeProbePolicyTest {
                 "com.example.app", false, "com.example.app", false, "com.aeginning.adskip"));
     }
 
-    @Test public void ownAppIsNeverAUserForegroundTarget() {
-        assertFalse(PrivilegeProbePolicy.shouldProbeForeground(
-                "com.example.old", false, "com.aeginning.adskip", false, "com.aeginning.adskip"));
+    @Test public void ownAppTransitionIsRecordedSoReturnToTargetCanBeDetected() {
+        assertTrue(PrivilegeProbePolicy.shouldProbeForeground(
+                "com.example.app", true, "com.aeginning.adskip", false, "com.aeginning.adskip"));
+        assertTrue(PrivilegeProbePolicy.shouldProbeForeground(
+                "com.aeginning.adskip", false, "com.example.app", true, "com.aeginning.adskip"));
     }
 }
