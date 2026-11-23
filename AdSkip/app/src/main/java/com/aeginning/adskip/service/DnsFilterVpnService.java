@@ -15,7 +15,6 @@ import android.content.pm.ServiceInfo;
 
 import com.aeginning.adskip.MainActivity;
 import com.aeginning.adskip.db.RuleDatabase;
-import com.aeginning.adskip.service.SuccessNotificationManager;
 
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
