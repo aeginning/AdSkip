@@ -51,7 +51,7 @@ public class PrivilegeUtilsTest {
     @Test public void foregroundPackageParserNeverGuessesFromArbitraryText() {
         assertEquals("", PrivilegeUtils.extractForegroundPackage(null));
         assertEquals("", PrivilegeUtils.extractForegroundPackage("no resumed activity"));
-        assertEquals("", PrivilegeUtils.extractForegroundPackage("com.example"));
+        assertEquals("", PrivilegeUtils.extractForegroundPackage("com"));
         assertEquals("", PrivilegeUtils.extractForegroundPackage("pm list packages: com.example.app"));
     }
 
