@@ -385,7 +385,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 }
                 int width = getResources().getDisplayMetrics().widthPixels;
                 int height = getResources().getDisplayMetrics().heightPixels;
-                boolean topRightSkipFallback = isTopRightSkipFallback(label, bounds, width, height);
+                boolean topRightSkipFallback = isTopRightSkipFallback(label, bounds, width, height, context);
                 AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(label, context,
                         clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
                         bounds.width(), bounds.height(), width, height,
@@ -1202,7 +1202,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             Rect box = line.getBoundingBox();
                             if (box == null || isSuppressedLabel(suppressedLabels, lineText)) continue;
                             boolean topRightSkipFallback = isTopRightSkipFallback(
-                                    lineText, box, sourceWidth, sourceHeight);
+                                    lineText, box, sourceWidth, sourceHeight, context);
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                                     lineText, context, true, true, true, box.width(), box.height(),
                                     sourceWidth, sourceHeight,
@@ -1310,8 +1310,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private boolean isTopRightSkipFallback(String label, Rect bounds,
-                                               int screenWidth, int screenHeight) {
+                                               int screenWidth, int screenHeight,
+                                               String surroundingText) {
         return isExtremeSkipMode()
+                && !TextMatcher.hasAdContext(surroundingText)
                 && TextMatcher.isGenericSkipLabel(label)
                 && bounds != null
                 && SkipLayoutPolicy.isTopRightSkipPill(
@@ -1620,7 +1622,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                     observedLabel, context, true, true, true, mapped.width(), mapped.height(),
                                     screenWidth, screenHeight, isCountdownClickEnabled(), getMinimumSkipScore(),
                                     customSkipWords, isTopRightSkipFallback(
-                                            observedLabel, mapped, screenWidth, screenHeight));
+                                            observedLabel, mapped, screenWidth, screenHeight, context));
                             AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                                     firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
                                             : AdConfidenceScorer.Level.REVIEW, "首次 OCR 观察");
