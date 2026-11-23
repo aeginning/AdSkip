@@ -217,10 +217,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             if (isUserLaunchOnlyModeEnabled() && isHomePackage(pkg)) {
                 String clickedLabel = readLauncherClickLabel(event.getSource());
-                if (!clickedLabel.isEmpty()) {
-                    userLaunchTracker.recordLauncherClick(clickedLabel, SystemClock.elapsedRealtime());
-                    logDiagnostic(pkg, "USER_LAUNCH_INTENT_RECORDED",
-                            "已记录桌面/应用抽屉图标点击；等待短时间内匹配目标应用前台包名");
+                String clickedPackage = resolveEnabledPackageForLauncherLabel(clickedLabel);
+                if (!clickedPackage.isEmpty()) {
+                    userLaunchTracker.recordLauncherClick(clickedPackage, SystemClock.elapsedRealtime());
+                    logDiagnostic(clickedPackage, "USER_LAUNCH_INTENT_RECORDED",
+                            "桌面/应用抽屉图标标签唯一匹配到已启用应用包名；等待该包进入前台");
+                } else if (!clickedLabel.isEmpty()) {
+                    logDiagnostic(pkg, "USER_LAUNCH_INTENT_REJECTED",
+                            "图标标签无法唯一匹配到已启用的非系统应用；为避免同名应用误放行，不建立扫描许可");
                 }
             }
             recycleNode(fallbackRoot);
@@ -264,10 +268,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 && isUserLaunchOnlyModeEnabled()
                 && !pkg.equals(getPackageName())
                 && !isHomePackage(pkg) && !isSystemPackage(pkg)) {
-            String appLabel = getApplicationLabelForPackage(pkg);
-            if (userLaunchTracker.onForegroundPackage(pkg, appLabel, SystemClock.elapsedRealtime())) {
+            if (userLaunchTracker.onForegroundPackage(pkg, SystemClock.elapsedRealtime())) {
                 logDiagnostic(pkg, "USER_LAUNCH_ACCEPTED",
-                        "前台应用与最近一次桌面图标点击标签匹配；当前应用已加入用户启动许可集合");
+                        "前台包名与最近一次唯一匹配的桌面图标启动意图一致；当前前台会话获准扫描");
             }
         }
 
@@ -1981,6 +1984,34 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return false;
         }
         return AppScanPolicy.shouldScan(flags, true, true, userMode, userLaunched);
+    }
+
+    private String resolveEnabledPackageForLauncherLabel(String launcherLabel) {
+        String normalizedLauncherLabel = UserLaunchTracker.normalizeLauncherLabel(launcherLabel);
+        if (normalizedLauncherLabel.isEmpty() || database == null) return "";
+
+        String matchedPackage = "";
+        for (String packageName : database.getEnabledApps()) {
+            if (packageName == null || packageName.trim().isEmpty()
+                    || packageName.equals(getPackageName()) || isHomePackage(packageName)
+                    || isSystemPackage(packageName)) continue;
+            String installedLabel = getApplicationLabelForPackage(packageName);
+            if (!normalizedLauncherLabel.equals(
+                    UserLaunchTracker.normalizeLauncherLabel(installedLabel))) continue;
+
+            // Duplicate labels are ambiguous: never guess which package the user tapped.
+            if (!matchedPackage.isEmpty() && !matchedPackage.equals(packageName)) {
+                logDiagnostic("", "USER_LAUNCH_LABEL_AMBIGUOUS",
+                        "多个已启用应用拥有相同显示名称；该图标点击不建立用户启动许可");
+                return "";
+            }
+            matchedPackage = packageName;
+        }
+        if (matchedPackage.isEmpty()) {
+            logDiagnostic("", "USER_LAUNCH_LABEL_UNRESOLVED",
+                    "桌面图标名称未匹配任何已启用的非系统应用；不会建立扫描许可");
+        }
+        return matchedPackage;
     }
 
     private String readLauncherClickLabel(AccessibilityNodeInfo source) {
