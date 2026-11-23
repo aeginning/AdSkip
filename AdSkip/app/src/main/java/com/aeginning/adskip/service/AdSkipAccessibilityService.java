@@ -72,6 +72,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private RuleDatabase database;
     private FloatingStatusOverlay floatingStatusOverlay;
     private PrivilegeManager privilegeManager;
+    private boolean privilegeManagerAcquired;
     private Runnable pendingForegroundProbe;
     private volatile boolean foregroundProbeInFlight;
     private String lastPrivilegedForegroundPackage = "";
@@ -136,7 +137,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         koreanRecognizer = TextRecognition.getClient(new KoreanTextRecognizerOptions.Builder().build());
         devanagariRecognizer = TextRecognition.getClient(new DevanagariTextRecognizerOptions.Builder().build());
         privilegeManager = PrivilegeManager.getInstance(this);
-        privilegeManager.start();
+        privilegeManager.acquire();
+        privilegeManagerAcquired = true;
         floatingStatusOverlay.refresh(database, true, true);
         scheduleForegroundProbe(350L);
         logDiagnostic("", "SERVICE_CONNECTED", "无障碍服务已连接；等待用户启用并打开目标应用");
@@ -727,7 +729,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             countdownRescanAttempts = 0;
         }
         if (pendingCountdownRescan != null) return;
-        int maxRescans = ExtremeSkipPolicy.maxCountdownRescans(isExtremeSkipMode());
+        int maxRescans = ExtremeSkipPolicy.maxCountdownRescans(
+                isExtremeSkipMode(), isRiskModeEnabled());
         if (countdownRescanAttempts >= maxRescans) {
             logDiagnostic(packageName, "COUNTDOWN_TIMEOUT",
                     "主动扫描达到 " + maxRescans + " 次上限，未发现可安全点击按钮；未执行点击");
@@ -1074,7 +1077,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (packageName.equals(lastPrivilegedForegroundPackage)) return;
         lastPrivilegedForegroundPackage = packageName;
 
-        if (database == null || !database.isAppEnabled(packageName)) return;
+        if (database == null || !database.isAppEnabled(packageName)) {
+            lastPrivilegedForegroundPackage = packageName;
+            return;
+        }
         AccessibilityNodeInfo root = null;
         try {
             root = getRootInActiveWindow();
@@ -1095,6 +1101,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         "Shell 前台包名与实时无障碍窗口不一致；不以 Shell 结果代替活动窗口");
                 return;
             }
+            lastPrivilegedForegroundPackage = packageName;
             CharSequence classNameValue = root.getClassName();
             String currentClass = classNameValue == null ? "" : classNameValue.toString();
             int currentWindowId = root.getWindowId();
@@ -2287,6 +2294,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (pendingForegroundProbe != null) mainHandler.removeCallbacks(pendingForegroundProbe);
         foregroundProbeExecutor.shutdownNow();
         foregroundProbeInFlight = false;
+        if (privilegeManager != null && privilegeManagerAcquired) privilegeManager.release();
+        privilegeManagerAcquired = false;
         privilegeManager = null;
         screenshotExecutor.shutdownNow();
         super.onDestroy();
