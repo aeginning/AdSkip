@@ -8,7 +8,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.os.Build;
 
 import com.aeginning.adskip.MainActivity;
 
@@ -96,7 +95,6 @@ public final class SuccessNotificationManager {
     }
 
     private static void ensureChannel(NotificationManager manager) {
-        if (Build.VERSION.SDK_INT < 26) return;
         NotificationChannel channel = manager.getNotificationChannel(CHANNEL_ID);
         if (channel == null) {
             channel = new NotificationChannel(CHANNEL_ID, "AdSkip 拦截成功",
