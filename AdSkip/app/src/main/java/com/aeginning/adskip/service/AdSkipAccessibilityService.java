@@ -103,6 +103,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private String activeWindowClass;
     private int activeWindowId = -1;
     private boolean nodeScanIncomplete;
+    private int scanScreenWidthPx;
+    private int scanScreenHeightPx;
     private int nodeScanCount;
     private int nodeScanMaxDepth;
     private String nodeScanIncompleteReason = "";
@@ -371,8 +373,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
         }
 
-        // Never read text values from any editable field. A normal search box is not,
-        // however, a reason to suppress scanning of unrelated buttons elsewhere.
+        // Never read values from editable fields. Ordinary search inputs do not
+        // suppress unrelated controls; sensitive fields are tracked by geometry.
         if (!password && !editable) {
             CharSequence label = node.getText();
             CharSequence description = node.getContentDescription();
@@ -383,28 +385,35 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 text.append(description, 0, Math.min(description.length(), 16000 - text.length())).append(' ');
             }
         }
-        List<AccessibilityNodeInfo> children = new ArrayList<>();
+
+        // Leaf nodes are common. Avoid allocating a child list when there is
+        // nothing to traverse.
+        int childCount = node.getChildCount();
+        if (childCount <= 0) return;
+        if (childCount > MAX_NODES) {
+            markNodeScanIncomplete("单个节点的子节点数超过 " + MAX_NODES);
+            childCount = MAX_NODES;
+        }
+
+        List<PrioritizedNode> children = new ArrayList<>(Math.min(childCount, 64));
         try {
-            int childCount = node.getChildCount();
-            if (childCount > MAX_NODES) {
-                markNodeScanIncomplete("单个节点的子节点数超过 " + MAX_NODES);
-                childCount = MAX_NODES;
-            }
             for (int i = 0; i < childCount; i++) {
                 AccessibilityNodeInfo child = node.getChild(i);
-                if (child != null) children.add(child);
+                if (child != null) {
+                    // AccessibilityNodeInfo getters can cross the Binder boundary.
+                    // Cache each child's priority once instead of recalculating it
+                    // repeatedly from the sort comparator.
+                    children.add(new PrioritizedNode(child, scanPriority(child)));
+                }
             }
-            // Traverse likely skip controls first (explicit labels, then generic skip
-            // labels/close glyphs, clickable controls, and finally top-right controls).
-            // This changes discovery order only; the complete-tree and safety checks remain.
-            children.sort((left, right) -> Integer.compare(scanPriority(right), scanPriority(left)));
+            children.sort((left, right) -> Integer.compare(right.priority, left.priority));
             for (int i = 0; i < children.size(); i++) {
-                AccessibilityNodeInfo child = children.set(i, null);
-                if (child != null) collectNodes(child, depth + 1, nodes, text);
+                PrioritizedNode prioritized = children.set(i, null);
+                if (prioritized != null) collectNodes(prioritized.node, depth + 1, nodes, text);
             }
         } finally {
-            for (AccessibilityNodeInfo child : children) {
-                if (child != null) recycleNode(child);
+            for (PrioritizedNode child : children) {
+                if (child != null) recycleNode(child.node);
             }
         }
     }
@@ -429,10 +438,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (node.isClickable() && node.isEnabled()) score += 35;
         Rect bounds = new Rect();
         node.getBoundsInScreen(bounds);
-        int width = getResources().getDisplayMetrics().widthPixels;
-        int height = getResources().getDisplayMetrics().heightPixels;
-        if (!bounds.isEmpty() && height > 0 && bounds.top <= height * 0.42f) score += 18;
-        if (!bounds.isEmpty() && width > 0 && bounds.right >= width * 0.58f) score += 16;
+        if (!bounds.isEmpty() && scanScreenHeightPx > 0
+                && bounds.top <= scanScreenHeightPx * 0.42f) score += 18;
+        if (!bounds.isEmpty() && scanScreenWidthPx > 0
+                && bounds.right >= scanScreenWidthPx * 0.58f) score += 16;
         return score;
     }
 
@@ -441,6 +450,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         nodeScanCount = 0;
         nodeScanMaxDepth = 0;
         nodeScanIncompleteReason = "";
+        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+        scanScreenWidthPx = metrics.widthPixels;
+        scanScreenHeightPx = metrics.heightPixels;
     }
 
     private void markNodeScanIncomplete(String reason) {
@@ -834,7 +846,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
      */
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void scheduleSplashProbe(String packageName, long generation) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || destroyed || database == null
+        if (destroyed || database == null
                 || packageName == null || packageName.trim().isEmpty()
                 || generation != windowGeneration || !database.isAppEnabled(packageName)
                 || !isOcrEnabled()) return;
@@ -1172,8 +1184,17 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private void executeNodeCandidate(Candidate candidate, String packageName, String context,
                                        long generation) {
         if (destroyed || generation != windowGeneration || database == null
-                || !database.isAppEnabled(packageName)
-                || !isNodeTargetSafe(packageName, generation, candidate.bounds)) {
+                || !database.isAppEnabled(packageName)) {
+            logDiagnostic(packageName, "CLICK_REVALIDATION_FAILED",
+                    "点击前应用开关或窗口代次已变化；候选已作废");
+            return;
+        }
+        if (database.isLabelSuppressed(packageName, candidate.label)) {
+            logDiagnostic(packageName, "CLICK_BLOCKED",
+                    "点击前复核发现用户新增了误判屏蔽词；候选已作废");
+            return;
+        }
+        if (!isNodeTargetSafe(packageName, generation, candidate.bounds)) {
             logDiagnostic(packageName, "CLICK_REVALIDATION_FAILED",
                     "点击前应用开关、前台窗口、敏感区域避让或控件树完整性未通过；候选已作废");
             return;
@@ -2363,6 +2384,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             this.treeContext = treeContext;
             this.splashProbe = splashProbe;
             this.queuedAt = queuedAt;
+        }
+    }
+
+    private static final class PrioritizedNode {
+        final AccessibilityNodeInfo node;
+        final int priority;
+        PrioritizedNode(AccessibilityNodeInfo node, int priority) {
+            this.node = node;
+            this.priority = priority;
         }
     }
 
