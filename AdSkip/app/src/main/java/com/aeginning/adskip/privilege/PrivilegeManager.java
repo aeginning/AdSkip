@@ -125,7 +125,7 @@ public final class PrivilegeManager {
         this.userServiceArgs = new Shizuku.UserServiceArgs(
                 new ComponentName(appContext, AdSkipShellUserService.class))
                 .tag("adskip-readonly-diagnostics")
-                .version(1)
+                .version(2)
                 .processNameSuffix("adskip_diagnostics")
                 .debuggable(false)
                 .daemon(false);
