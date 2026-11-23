@@ -32,6 +32,21 @@ public class PrivilegeUtilsTest {
         assertEquals(-1, PrivilegeUtils.parseUid(null));
     }
 
+    @Test public void foregroundPackageParserReadsTopResumedComponentOnly() {
+        assertEquals("com.example.player", PrivilegeUtils.extractForegroundPackage(
+                "topResumedActivity=ActivityRecord{12 abcd u0 com.example.player/.MainActivity t42}"));
+        assertEquals("com.example.other", PrivilegeUtils.extractForegroundPackage(
+                "mResumedActivity: ActivityRecord{9 x u0 com.example.other/com.example.other.HomeActivity}"));
+        assertEquals("com.example.app", PrivilegeUtils.extractForegroundPackage("com.example.app"));
+    }
+
+    @Test public void foregroundPackageParserNeverGuessesFromArbitraryText() {
+        assertEquals("", PrivilegeUtils.extractForegroundPackage(null));
+        assertEquals("", PrivilegeUtils.extractForegroundPackage("no resumed activity"));
+        assertEquals("", PrivilegeUtils.extractForegroundPackage("com.example"));
+        assertEquals("", PrivilegeUtils.extractForegroundPackage("pm list packages: com.example.app"));
+    }
+
     @Test public void packageListIsFilteredAndBounded() {
         String raw = "package:com.example.one\npackage:com.example.two\nnot a package\npackage:com.example.one";
         String result = PrivilegeUtils.sanitizePackageList(raw, 10);
