@@ -95,6 +95,17 @@ public final class TextMatcher {
         return SkipWordLibrary.matches(value, customWords);
     }
 
+    /** Exact generic skip labels only; unlike substring matching this cannot accept CTA sentences. */
+    public static boolean isGenericSkipLabel(String text) {
+        String value = normalize(text);
+        return value.equals("跳过") || value.equals("略过") || value.equals("跳過")
+                || value.equals("skip") || value.equals("スキップ")
+                || value.equals("건너뛰기") || value.equals("omitir")
+                || value.equals("saltar") || value.equals("ignorer")
+                || value.equals("überspringen") || value.equals("пропустить")
+                || value.equals("تخطي");
+    }
+
     public static boolean isExplicitSkipAd(String text) {
         return containsAny(normalize(text), EXPLICIT_SKIP_AD);
     }
