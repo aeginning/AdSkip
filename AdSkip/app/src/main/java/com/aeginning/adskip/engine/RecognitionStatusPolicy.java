@@ -4,6 +4,12 @@ package com.aeginning.adskip.engine;
 public final class RecognitionStatusPolicy {
     private RecognitionStatusPolicy() { }
 
+    /** True only when a valid user-facing state differs from the currently queued state. */
+    public static boolean shouldUpdate(String previous, String next) {
+        if (next == null || next.trim().isEmpty()) return false;
+        return !next.equals(previous);
+    }
+
     public static String fromDiagnostic(String action) {
         if (action == null) return null;
         switch (action) {
