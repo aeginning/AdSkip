@@ -1077,6 +1077,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     } else if (!resultPackage.isEmpty()) {
                         handlePrivilegedForegroundPackage(resultPackage);
                     } else {
+                        // The foreground identity is unknown. Forget the previous
+                        // observation so the next valid package is treated as a fresh
+                        // session instead of being suppressed as an unchanged package.
+                        lastPrivilegedForegroundPackage = "";
+                        lastPrivilegedForegroundWasEnabled = false;
                         logDiagnostic("", "PRIVILEGED_NO_FOREGROUND_PACKAGE",
                                 "Shizuku 可用，但系统未返回可识别的 top-resumed 前台包名；已降低轮询频率");
                     }
