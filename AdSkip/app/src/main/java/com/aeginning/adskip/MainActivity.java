@@ -873,10 +873,20 @@ public final class MainActivity extends Activity {
                     if (which == 0) runPrivilegeQuery("已安装第三方应用", service ->
                             PrivilegeUtils.sanitizePackageList(service.listThirdPartyPackages(), 300));
                     else if (which == 1) runForegroundDiagnostic();
-                    else if (which == 2) promptPackageName("查询应用包元数据", pkg ->
-                            runPrivilegeQuery("应用包元数据：" + pkg, service -> service.getPackageInfo(pkg)));
-                    else if (which == 3) promptPackageName("查询 AppOps（只读）", pkg ->
-                            runPrivilegeQuery("AppOps 状态：" + pkg, service -> service.getAppOps(pkg)));
+                    else if (which == 2) promptPackageName("查询应用包元数据", pkg -> {
+                        if (isSystemOrUnknownPackage(pkg)) {
+                            Toast.makeText(this, "系统应用或无法验证的包已排除。", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        runPrivilegeQuery("应用包元数据：" + pkg, service -> service.getPackageInfo(pkg));
+                    });
+                    else if (which == 3) promptPackageName("查询 AppOps（只读）", pkg -> {
+                        if (isSystemOrUnknownPackage(pkg)) {
+                            Toast.makeText(this, "系统应用或无法验证的包已排除。", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        runPrivilegeQuery("AppOps 状态：" + pkg, service -> service.getAppOps(pkg));
+                    });
                 }).show();
     }
 
