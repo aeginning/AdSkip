@@ -47,6 +47,27 @@ public class FloatingOverlayFormatterTest {
                 + "近 24 小时自动点击：9 次", actual);
     }
 
+    @Test public void appendsLiveRecognitionStateWithoutReorderingOriginalRows() {
+        String actual = FloatingOverlayFormatter.format(
+                true, "已启用",
+                true, 2,
+                true, "运行中",
+                true, 5,
+                true, "已启用",
+                false, 0,
+                false, 0,
+                false, 0,
+                false, 0,
+                false, 0,
+                true, "关闭成功");
+        assertEquals("广告跳过：已启用\\n"
+                + "已启用应用：2 个\\n"
+                + "DNS 过滤：运行中\\n"
+                + "近 24 小时自动点击：5 次\\n"
+                + "OCR 辅助识别：已启用\\n"
+                + "当前识别状态：关闭成功", actual);
+    }
+
     @Test public void returnsHelpfulTextWhenEveryDisplayItemIsDisabled() {
         assertEquals("已开启悬浮窗 · 暂无显示项目",
                 FloatingOverlayFormatter.format(
