@@ -62,14 +62,14 @@ public final class AdConfidenceScorer {
         String candidate = normalize(label);
         String context = normalize(screenText);
         if (candidate.isEmpty()) return result(0, "空标签");
-        if (TextMatcher.isNegativeSkip(candidate)) return result(0, "目标明确表示不可跳过");
-        if (TextMatcher.isDangerous(candidate)) return result(0, "目标包含敏感操作词");
-        boolean closeGlyph = TextMatcher.isCloseGlyph(candidate);
-        boolean countdownSkipLabel = TextMatcher.isCountdownSkipLabel(candidate);
-        boolean adContext = TextMatcher.hasAdContext(context);
+        if (TextMatcher.isNegativeSkipNormalized(candidate)) return result(0, "目标明确表示不可跳过");
+        if (TextMatcher.isDangerousNormalized(candidate)) return result(0, "目标包含敏感操作词");
+        boolean closeGlyph = TextMatcher.isCloseGlyphNormalized(candidate);
+        boolean countdownSkipLabel = TextMatcher.isCountdownSkipLabelNormalized(candidate);
+        boolean adContext = TextMatcher.hasAdContextNormalized(context);
         boolean allowedCountdownTarget = allowCountdownSkip && countdownSkipLabel && adContext;
         boolean allowedCloseGlyph = closeGlyph && adContext;
-        if ((TextMatcher.isCountdown(candidate) || TextMatcher.isCountdown(context))
+        if ((TextMatcher.isCountdownNormalized(candidate) || TextMatcher.isCountdownNormalized(context))
                 && !allowedCountdownTarget && !allowedCloseGlyph) {
             return result(0, "页面仍处于广告倒计时，倒计时点击未启用或目标不明确");
         }
@@ -85,28 +85,28 @@ public final class AdConfidenceScorer {
 
         int score;
         if (closeGlyph) {
-            if (!TextMatcher.hasAdContext(context)) return result(0, "X 关闭符号缺少广告上下文");
+            if (!TextMatcher.hasAdContextNormalized(context)) return result(0, "X 关闭符号缺少广告上下文");
             score = 70;
         } else if (allowedCountdownTarget) {
             score = 70;
-        } else if (TextMatcher.isExplicitSkipAd(candidate)) {
+        } else if (TextMatcher.isExplicitSkipAdNormalized(candidate)) {
             score = 70;
-        } else if (TextMatcher.isExplicitCloseAd(candidate)) {
+        } else if (TextMatcher.isExplicitCloseAdNormalized(candidate)) {
             score = 66;
         } else if (allowTopRightSkipFallback && !adContext
                 && TextMatcher.isGenericSkipLabel(candidate)) {
             // Layout was independently checked by SkipLayoutPolicy in the caller.
             // This remains below the default score floor and requires extreme mode.
             score = 54;
-        } else if (TextMatcher.isCustomSkipPhrase(candidate, customSkipWords)) {
+        } else if (TextMatcher.isCustomSkipPhraseNormalized(candidate, customSkipWords)) {
             if (!adContext) return result(0, "自定义跳过词缺少广告上下文");
             // Custom terms can enter review, never the highest-confidence built-in tier.
             score = 54;
         } else if (containsAny(candidate, "跳过", "skip")) {
-            if (!TextMatcher.hasAdContext(context)) return result(0, "普通跳过词缺少广告上下文");
+            if (!TextMatcher.hasAdContextNormalized(context)) return result(0, "普通跳过词缺少广告上下文");
             score = 48;
         } else if (containsAny(candidate, "关闭", "close")) {
-            if (!TextMatcher.hasAdContext(context)) return result(0, "普通关闭词缺少广告上下文");
+            if (!TextMatcher.hasAdContextNormalized(context)) return result(0, "普通关闭词缺少广告上下文");
             score = 45;
         } else {
             return result(0, "未匹配到允许的跳过词");
@@ -115,7 +115,7 @@ public final class AdConfidenceScorer {
         if (adContext) score += 15;
         if (clickable && enabled && visible) score += 8;
         score += 7; // Geometry is already bounded and considered plausible.
-        if (TextMatcher.hasCriticalActionContext(context)) {
+        if (TextMatcher.hasCriticalActionContextNormalized(context)) {
             return result(0, "页面包含高风险操作上下文");
         }
         score = Math.min(100, score);
