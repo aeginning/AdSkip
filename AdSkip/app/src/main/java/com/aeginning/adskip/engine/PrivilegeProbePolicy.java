@@ -10,6 +10,30 @@ public final class PrivilegeProbePolicy {
         return 1_500L;
     }
 
+    /** Use the fast cadence only after a valid foreground package was resolved. */
+    public static long nextIntervalMs(boolean foregroundPackageResolved,
+                                      boolean extreme, boolean riskMode) {
+        return foregroundPackageResolved
+                ? intervalMs(extreme, riskMode) : retryWhenUnavailableMs();
+    }
+
+    /**
+     * Re-probe when the package changes or when an already-foreground app becomes
+     * newly enabled. This lets users enable the current app without reopening it.
+     */
+    public static boolean shouldProbeForeground(String previousPackage, boolean previousEnabled,
+                                                String currentPackage, boolean currentEnabled,
+                                                String ownPackage) {
+        String current = normalize(currentPackage);
+        if (current.isEmpty() || current.equals(normalize(ownPackage)) || !currentEnabled) return false;
+        String previous = normalize(previousPackage);
+        return !current.equals(previous) || !previousEnabled;
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim();
+    }
+
     public static long retryWhenUnavailableMs() {
         return 2_500L;
     }
