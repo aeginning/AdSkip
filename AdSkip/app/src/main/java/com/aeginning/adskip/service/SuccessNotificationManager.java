@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.os.Build;
 
 import com.aeginning.adskip.MainActivity;
 
@@ -71,11 +72,12 @@ public final class SuccessNotificationManager {
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             PendingIntent pending = PendingIntent.getActivity(context, notificationId, open,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            String displayDetail = detail + " · 累计 " + count + " 次";
             Notification notification = new Notification.Builder(context, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.stat_sys_warning)
                     .setContentTitle(title)
-                    .setContentText(detail)
-                    .setStyle(new Notification.BigTextStyle().bigText(detail))
+                    .setContentText(displayDetail)
+                    .setStyle(new Notification.BigTextStyle().bigText(displayDetail))
                     .setContentIntent(pending)
                     .setCategory(Notification.CATEGORY_STATUS)
                     .setNumber(count)
