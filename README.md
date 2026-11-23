@@ -16,6 +16,13 @@ The **Android CI** workflow runs JVM unit tests, Android Lint, and `:app:assembl
 
 Open `AdSkip/` in Android Studio and build the `app` debug variant. The project uses Java 17, minSdk 26, and targetSdk 36.
 
+## 1.4.5 app scan policy
+
+- System apps and updated system apps are excluded from Accessibility, OCR, splash/countdown probes, Shizuku/ADB foreground handling, and manual package diagnostics. Unknown package metadata is rejected.
+- An optional, default-off **user-launched-only** mode requires a launcher icon click to resolve uniquely to one enabled, non-system app package. A duplicate or unresolved icon label does not grant permission.
+- Authorization applies only while that exact package is the foreground app and is revoked as soon as another package becomes foreground. Background apps and notification/deep-link returns cannot reuse old authorization.
+- After enabling the mode, return to the home screen/app drawer and launch the target app by tapping its icon. The target app must remain in the foreground for AdSkip to scan it.
+
 ## Permissions and limitations
 
 Android Accessibility and VPN permissions must be enabled explicitly by the device owner. DNS filtering uses Android's single VPN slot and does not filter DoH/DoT, hard-coded IPs, or all in-app advertising.
