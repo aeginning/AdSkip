@@ -24,6 +24,7 @@ import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -40,6 +41,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -59,6 +62,8 @@ public final class MainActivity extends Activity {
     private CompoundButton ocrSwitch;
     private TextView privilegeStatus;
     private PrivilegeManager privilegeManager;
+    private PrivilegeManager.Listener privilegeListener;
+    private final Map<String, View> navigationTargets = new LinkedHashMap<>();
     private final ExecutorService privilegeExecutor = Executors.newSingleThreadExecutor();
     private final ExecutorService dnsFeedExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -67,9 +72,11 @@ public final class MainActivity extends Activity {
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         database = new RuleDatabase(this);
-        privilegeManager = new PrivilegeManager(this, status -> runOnUiThread(() -> {
+        privilegeManager = PrivilegeManager.getInstance(this);
+        privilegeListener = status -> runOnUiThread(() -> {
             if (!activityDestroyed) updatePrivilegeStatus(status.toDisplayText());
-        }));
+        });
+        privilegeManager.addListener(privilegeListener);
         privilegeManager.start();
         buildUi();
     }
@@ -77,6 +84,7 @@ public final class MainActivity extends Activity {
     @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
     private void buildUi() {
         ScrollView scroll = new ScrollView(this);
+        navigationTargets.clear();
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
@@ -113,7 +121,7 @@ public final class MainActivity extends Activity {
 
         android.widget.ImageView appIcon = new android.widget.ImageView(this);
         appIcon.setImageResource(R.drawable.ic_adskip);
-        brand.addView(appIcon, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        brand.addView(appIcon, new LinearLayout.LayoutParams(dp(48), dp(48)));
 
         LinearLayout brandText = new LinearLayout(this);
         brandText.setOrientation(LinearLayout.VERTICAL);
@@ -121,7 +129,7 @@ public final class MainActivity extends Activity {
         brandTextParams.leftMargin = dp(12);
         brand.addView(brandText, brandTextParams);
 
-        TextView title = label(R.string.main_title, 30, 0xFF172033, true);
+        TextView title = label(R.string.main_title, 28, 0xFF172033, true);
         brandText.addView(title);
         TextView subtitle = label("智能跳广告助手 · 本地识别 · 安全点击", 13, 0xFF667085, false);
         addGap(brandText, 2);
@@ -138,6 +146,7 @@ public final class MainActivity extends Activity {
 
         // Main runtime overview.
         LinearLayout statusCard = card(root);
+        navigationTargets.put("运行", statusCard);
         LinearLayout statusHeading = new LinearLayout(this);
         statusHeading.setOrientation(LinearLayout.HORIZONTAL);
         statusHeading.setGravity(Gravity.CENTER_VERTICAL);
@@ -172,6 +181,7 @@ public final class MainActivity extends Activity {
         // Optional floating status panel. It is hosted by the accessibility service,
         // so no SYSTEM_ALERT_WINDOW permission or separate foreground service is needed.
         LinearLayout overlayCard = card(root);
+        navigationTargets.put("悬浮窗", overlayCard);
         overlayCard.addView(label("状态悬浮窗", 18, 0xFF172033, true));
         TextView overlayHint = label(
                 "在其他应用上方显示 AdSkip 运行状态。可拖动顶部移动位置、收起或关闭；无障碍服务停止时悬浮窗会自动消失。无需额外悬浮窗权限。",
@@ -202,10 +212,13 @@ public final class MainActivity extends Activity {
                 overlayCard, "显示近 24 小时未执行次数", "floating_overlay_show_no_action", false);
         android.widget.Switch overlayShowErrors = addOverlayPreferenceSwitch(
                 overlayCard, "显示近 24 小时错误次数", "floating_overlay_show_errors", false);
+        android.widget.Switch overlayShowRecognitionState = addOverlayPreferenceSwitch(
+                overlayCard, "显示当前识别状态（识别中 / 点击中 / 关闭成功）",
+                "floating_overlay_show_recognition_state", true);
         android.widget.Switch[] overlayOptions = {
                 overlayShowSkip, overlayShowApps, overlayShowDns, overlayShowClicks,
                 overlayShowOcr, overlayShowDnsRules, overlayShowSafetyBlocks, overlayShowDnsBlocks,
-                overlayShowNoAction, overlayShowErrors
+                overlayShowNoAction, overlayShowErrors, overlayShowRecognitionState
         };
         Runnable syncOverlayOptions = () -> {
             boolean enabled = overlayMaster.isChecked();
@@ -227,21 +240,22 @@ public final class MainActivity extends Activity {
         TextView sizeHeading = label("悬浮窗尺寸自定义", 14, 0xFF344054, true);
         overlayCard.addView(sizeHeading);
         TextView sizeHint = label(
-                "尺寸调节范围已扩展。宽度最高 560dp、高度最高 900dp、文字最高 24sp；实际显示尺寸会自动适配屏幕边界，内容多时仍可在悬浮窗内滚动。",
+                "宽度可缩至 104dp、高度可缩至 76dp、文字可缩至 7sp；也可放大并在内容区滚动。尺寸实时生效，悬浮窗位置和原有显示项目保留。",
                 11, 0xFF7A8495, false);
         addGap(overlayCard, 3);
         overlayCard.addView(sizeHint);
         addOverlaySizeControl(overlayCard, "悬浮窗宽度", "floating_overlay_width_dp",
-                150, 560, 178, "dp");
+                104, 560, 148, "dp");
         addOverlaySizeControl(overlayCard, "悬浮窗高度", "floating_overlay_height_dp",
-                120, 900, 190, "dp");
+                76, 900, 132, "dp");
         addOverlaySizeControl(overlayCard, "悬浮窗文字大小", "floating_overlay_text_size_sp",
-                9, 24, 10, "sp");
+                7, 24, 8, "sp");
 
         addGap(root, 14);
 
         // App automation and false-positive controls.
         LinearLayout appCard = card(root);
+        navigationTargets.put("应用", appCard);
         appCard.addView(label("应用自动化", 18, 0xFF172033, true));
         TextView appHint = label("仅对你明确勾选的桌面应用启用识别与安全点击。默认不对其他应用自动操作。", 12, 0xFF7A8495, false);
         addGap(appCard, 5);
@@ -266,6 +280,7 @@ public final class MainActivity extends Activity {
 
         // Local activity and diagnostics.
         LinearLayout statsCard = card(root);
+        navigationTargets.put("统计", statsCard);
         statsCard.addView(label("本地运行统计", 18, 0xFF172033, true));
         TextView statsHint = label("自动识别与 DNS 过滤的近 24 小时记录", 12, 0xFF7A8495, false);
         addGap(statsCard, 4);
@@ -287,9 +302,10 @@ public final class MainActivity extends Activity {
 
         // Optional Shizuku / ADB diagnostics.
         LinearLayout privilegeCard = card(root);
+        navigationTargets.put("Shizuku", privilegeCard);
         privilegeCard.addView(label("Shizuku / ADB 增强模式", 18, 0xFF172033, true));
         TextView privilegeHint = label(
-                "可选只读诊断：查询已安装应用、前台 Activity、应用包元数据和 AppOps。不会修改权限、禁用应用或执行任意 Shell 命令。Shizuku 断开后，普通无障碍模式继续运行。",
+                "可选只读增强：已授权时自动观察 top-resumed 前台应用，应用切入前台即可触发快速探测；同时支持已安装应用、Activity、包元数据和 AppOps 诊断。不会修改权限或执行任意 Shell 命令；Shizuku 断开后普通模式继续运行。",
                 12, 0xFF7A8495, false);
         privilegeHint.setLineSpacing(dp(3), 1.0f);
         addGap(privilegeCard, 5);
@@ -315,6 +331,7 @@ public final class MainActivity extends Activity {
 
         // OCR keeps its original preference and callback.
         LinearLayout ocrCard = card(root);
+        navigationTargets.put("OCR", ocrCard);
         ocrCard.addView(label("图像识别（OCR）", 18, 0xFF172033, true));
         TextView ocrHint = label("Android 11+ 可使用无障碍截图在本机识别中文和英文；截图不会上传。", 12, 0xFF7A8495, false);
         ocrHint.setLineSpacing(dp(3), 1.0f);
@@ -337,6 +354,7 @@ public final class MainActivity extends Activity {
 
         // Optional countdown clicking and configurable second-observation text similarity.
         LinearLayout recognitionCard = card(root);
+        navigationTargets.put("识别", recognitionCard);
         recognitionCard.addView(label("跳过识别设置", 18, 0xFF172033, true));
         TextView recognitionHint = label(
                 "支持倒计时“跳过 + 数字”及广告右上角 X / × 关闭符号识别。灵敏度控制普通模式的候选触发门槛；极速模式会使用更低门槛和更短扫描间隔。",
@@ -346,14 +364,14 @@ public final class MainActivity extends Activity {
         recognitionCard.addView(recognitionHint);
 
         android.widget.Switch extremeModeSwitch = new android.widget.Switch(this);
-        extremeModeSwitch.setText("开启极速跳过广告模式（高频扫描 / OCR）");
+        extremeModeSwitch.setText("开启极速识别模式（高频扫描 / OCR）");
         extremeModeSwitch.setTextSize(14);
         extremeModeSwitch.setTextColor(0xFF344054);
         extremeModeSwitch.setPadding(0, dp(8), 0, dp(4));
         extremeModeSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
                 .getBoolean("extreme_skip_mode", false));
         extremeModeSwitch.setContentDescription(
-                "极速跳过模式：提高扫描频率并降低最低候选分数，但保留风险操作和窗口安全检查");
+                "极速识别模式：提高扫描频率并降低候选门槛，但保留应用白名单、窗口校验和风险操作保护");
         extremeModeSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
             getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
                     .putBoolean("extreme_skip_mode", checked).apply();
@@ -369,6 +387,42 @@ public final class MainActivity extends Activity {
         extremeModeHint.setLineSpacing(dp(3), 1.0f);
         addGap(recognitionCard, 2);
         recognitionCard.addView(extremeModeHint);
+
+        android.widget.Switch riskModeSwitch = new android.widget.Switch(this);
+        riskModeSwitch.setText("开启风险模式（更快、更敏感）");
+        riskModeSwitch.setTextSize(14);
+        riskModeSwitch.setTextColor(0xFFB54708);
+        riskModeSwitch.setPadding(0, dp(8), 0, dp(4));
+        riskModeSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("risk_mode_enabled", false));
+        riskModeSwitch.setContentDescription(
+                "风险模式：更高频扫描、更快 OCR、更多有限开屏探测轮次；不会关闭应用白名单、窗口核验、敏感区域或购买安装授权等高风险操作拦截");
+        riskModeSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
+            getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                    .putBoolean("risk_mode_enabled", checked)
+                    .putBoolean("extreme_skip_mode", checked || extremeModeSwitch.isChecked())
+                    .apply();
+            if (checked && !extremeModeSwitch.isChecked()) extremeModeSwitch.setChecked(true);
+            Toast.makeText(this, checked
+                    ? "风险模式已开启：更快、更敏感，可能增加普通页面误匹配、耗电和发热；购买、安装、授权、支付等硬拦截仍生效。"
+                    : "风险模式已关闭；极速模式按原开关状态运行。", Toast.LENGTH_LONG).show();
+        });
+        extremeModeSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
+            if (!checked && riskModeSwitch.isChecked()) riskModeSwitch.setChecked(false);
+            getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                    .putBoolean("extreme_skip_mode", checked || riskModeSwitch.isChecked()).apply();
+            Toast.makeText(this, checked
+                    ? "极速识别已开启；安全保护仍生效。"
+                    : "已恢复标准识别模式。", Toast.LENGTH_LONG).show();
+        });
+        addGap(recognitionCard, 4);
+        recognitionCard.addView(riskModeSwitch);
+        TextView riskModeHint = label(
+                "风险模式将事件扫描提高至约 45ms、广告 OCR 触发间隔约 110ms、倒计时重扫约 60ms、开屏首次探测约 55ms；Shizuku 前台观察约 300ms。识别请求仍使用单任务 + 最新请求队列，不会并发堆积。为防止误购、误安装或误授权，应用白名单、实时窗口一致性、敏感输入区域、高风险操作词和点击冷却不可关闭。",
+                11, 0xFF8A4B08, false);
+        riskModeHint.setLineSpacing(dp(3), 1.0f);
+        addGap(recognitionCard, 2);
+        recognitionCard.addView(riskModeHint);
 
         Button defaultWordsButton = button("查看默认跳过词库", 0xFFF0F3F8);
         defaultWordsButton.setTextColor(0xFF344054);
@@ -474,6 +528,7 @@ public final class MainActivity extends Activity {
 
         // DNS controls remain individually available.
         LinearLayout dnsCard = card(root);
+        navigationTargets.put("DNS", dnsCard);
         dnsCard.addView(label("DNS 广告域名过滤", 18, 0xFF172033, true));
         TextView dnsHint = label("通过本地 DNS 规则拦截已知广告与追踪域名。启用时会占用 Android 单 VPN 通道。", 12, 0xFF7A8495, false);
         dnsHint.setLineSpacing(dp(3), 1.0f);
@@ -528,6 +583,7 @@ public final class MainActivity extends Activity {
 
         // Safety and network limitations are kept visible, but separated from controls.
         LinearLayout safetyCard = card(root);
+        navigationTargets.put("安全", safetyCard);
         safetyCard.addView(label("安全与隐私说明", 16, 0xFF172033, true));
         TextView safety = label(
                 "安全策略：只识别明确的“跳过 / Skip / 关闭广告”控件。购买、下载、安装、授权、支付、订阅、登录、同意等操作会被拦截；不确定时不点击。",
@@ -542,6 +598,43 @@ public final class MainActivity extends Activity {
         limitation.setLineSpacing(dp(3), 1.0f);
         addGap(safetyCard, 10);
         safetyCard.addView(limitation);
+
+        // About and release history are first-class, visible app sections.
+        LinearLayout aboutCard = card(root);
+        navigationTargets.put("关于", aboutCard);
+        aboutCard.addView(label("关于 AdSkip", 18, 0xFF172033, true));
+        TextView aboutSummary = label("智能广告识别与跳过 · 本地 OCR · 无障碍自动化 · 可选 Shizuku 前台加速 · DNS 过滤",
+                12, 0xFF667085, false);
+        aboutSummary.setLineSpacing(dp(3), 1.0f);
+        addGap(aboutCard, 5);
+        aboutCard.addView(aboutSummary);
+        addGap(aboutCard, 10);
+        Button aboutButton = button("关于应用", 0xFFEAF0FF);
+        aboutButton.setTextColor(0xFF245BDB);
+        aboutCard.addView(aboutButton, new LinearLayout.LayoutParams(-1, dp(46)));
+        aboutButton.setOnClickListener(v -> showAboutDialog());
+        addGap(aboutCard, 7);
+        Button changelogButton = button("查看更新日志", 0xFFF0F3F8);
+        changelogButton.setTextColor(0xFF344054);
+        aboutCard.addView(changelogButton, new LinearLayout.LayoutParams(-1, dp(46)));
+        changelogButton.setOnClickListener(v -> showChangelogDialog());
+
+        // One compact horizontal section bar replaces repeated manual scrolling.
+        HorizontalScrollView navigation = new HorizontalScrollView(this);
+        navigation.setHorizontalScrollBarEnabled(false);
+        navigation.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout navigationRow = new LinearLayout(this);
+        navigationRow.setOrientation(LinearLayout.HORIZONTAL);
+        navigationRow.setGravity(Gravity.CENTER_VERTICAL);
+        navigationRow.setPadding(0, dp(2), 0, dp(2));
+        navigation.addView(navigationRow, new HorizontalScrollView.LayoutParams(-2, -2));
+        for (String section : navigationTargets.keySet()) {
+            addNavigationChip(navigationRow, section, () -> {
+                View target = navigationTargets.get(section);
+                if (target != null) scroll.smoothScrollTo(0, Math.max(0, target.getTop() - dp(12)));
+            });
+        }
+        root.addView(navigation, 1);
 
         setContentView(scroll);
         // Light navigation-bar icons require API 27. Keep API 26 readable with a dark bar.
@@ -579,6 +672,56 @@ public final class MainActivity extends Activity {
 
     private void updatePrivilegeStatus(String value) {
         if (privilegeStatus != null) privilegeStatus.setText(value);
+    }
+
+    private void showAboutDialog() {
+        String message = "AdSkip 智能跳广告助手\n"
+                + "版本：" + getAppVersionName() + "\n"
+                + "包名：com.aeginning.adskip\n"
+                + "最低系统：Android 8.0（API 26）\n\n"
+                + "核心能力：无障碍控件识别、多语言本地 OCR、倒计时重扫、默认/自定义词库、误判屏蔽、DNS 过滤、可选 Shizuku 前台检测与状态悬浮窗。\n\n"
+                + "隐私：识别与诊断均在本机执行；Shizuku 只读取前台 Activity 与必要的只读系统信息，不修改第三方应用权限。";
+        new AlertDialog.Builder(this).setTitle("关于 AdSkip")
+                .setMessage(message)
+                .setNegativeButton("关闭", null)
+                .setPositiveButton("更新日志", (dialog, which) -> showChangelogDialog())
+                .show();
+    }
+
+    private void showChangelogDialog() {
+        String changelog =
+                "AdSkip " + getAppVersionName() + " · 极限识别与 UI 重构\n\n"
+                + "• 新增风险模式：更短扫描间隔、更快开屏探测及更高候选灵敏度；硬安全边界不能关闭。\n"
+                + "• Shizuku 已授权时自动监测 top-resumed 前台应用；检测到已启用应用并与实时无障碍窗口一致后，立即启动快速探测。\n"
+                + "• 悬浮窗可缩小至 104dp 宽、76dp 高、7sp 字号，并实时显示扫描、OCR、点击和关闭结果。\n"
+                + "• 主界面增加快捷分区导航、“关于应用”和“更新日志”；调整卡片间距、层级、按钮及信息密度。\n"
+                + "• 优化 OCR 最新请求调度、控件扫描优先级、耗时诊断及状态回报。原功能和安全保护保留。\n\n"
+                + "AdSkip 1.3.14\n"
+                + "• OCR 单任务 + 最新待处理队列，避免识别任务积压。\n"
+                + "• 更准确地区分真实窗口切换和同一窗口刷新。\n"
+                + "• 控件树优先扫描跳过/关闭候选，补充 OCR 耗时和失败原因日志。\n\n"
+                + "AdSkip 1.3.13\n"
+                + "• 极速识别、开屏主动探测和右上角跳过胶囊布局识别。\n\n"
+                + "AdSkip 1.3.12\n"
+                + "• 默认跳过词库展示和本地自定义词库管理。";
+        TextView body = label(changelog, 13, 0xFF344054, false);
+        body.setLineSpacing(dp(4), 1.0f);
+        body.setPadding(dp(14), dp(12), dp(14), dp(12));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(body, new ScrollView.LayoutParams(-1, -2));
+        new AlertDialog.Builder(this).setTitle("更新日志")
+                .setView(scroll).setPositiveButton("关闭", null).show();
+    }
+
+    private void addNavigationChip(LinearLayout parent, String text, Runnable action) {
+        TextView chip = label(text, 12, 0xFF344054, true);
+        chip.setGravity(Gravity.CENTER);
+        chip.setPadding(dp(12), dp(8), dp(12), dp(8));
+        chip.setBackground(roundedDrawable(0xFFFFFFFF, 0xFFE2E8F0, 18));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, dp(34));
+        params.rightMargin = dp(7);
+        parent.addView(chip, params);
+        chip.setOnClickListener(view -> action.run());
     }
 
     private void connectShizuku() {
@@ -1505,8 +1648,8 @@ public final class MainActivity extends Activity {
     private LinearLayout card(LinearLayout parent) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(17), dp(18), dp(17));
-        card.setBackground(roundedDrawable(0xFFFFFFFF, 0xFFE8ECF3, 20));
+        card.setPadding(dp(16), dp(15), dp(16), dp(15));
+        card.setBackground(roundedDrawable(0xFFFFFFFF, 0xFFE8ECF3, 18));
         card.setElevation(dp(1));
         card.setClipToOutline(true);
         parent.addView(card, new LinearLayout.LayoutParams(-1, -2));
