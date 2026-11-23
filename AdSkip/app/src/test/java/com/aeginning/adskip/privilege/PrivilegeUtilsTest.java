@@ -44,7 +44,7 @@ public class PrivilegeUtilsTest {
         assertEquals("", PrivilegeUtils.extractTopResumedPackage(
                 "mLastPausedActivity: ActivityRecord{12 x u0 com.example.paused/.MainActivity}"));
         assertEquals("com.example.foreground", PrivilegeUtils.extractTopResumedPackage(
-                "mLastPausedActivity: ActivityRecord{9 x u0 com.example.old/.OldActivity}\\n"
+                "mLastPausedActivity: ActivityRecord{9 x u0 com.example.old/.OldActivity}\n"
                         + "topResumedActivity=ActivityRecord{12 y u0 com.example.foreground/.HomeActivity}"));
     }
 
