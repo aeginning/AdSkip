@@ -25,9 +25,11 @@ public final class PrivilegeProbePolicy {
                                                 String currentPackage, boolean currentEnabled,
                                                 String ownPackage) {
         String current = normalize(currentPackage);
-        if (current.isEmpty() || current.equals(normalize(ownPackage)) || !currentEnabled) return false;
+        if (current.isEmpty() || current.equals(normalize(ownPackage))) return false;
         String previous = normalize(previousPackage);
-        return !current.equals(previous) || !previousEnabled;
+        // Report both package transitions and allow-list state transitions. The caller
+        // records disabled states without probing, so a later false -> true change is seen.
+        return !current.equals(previous) || previousEnabled != currentEnabled;
     }
 
     private static String normalize(String value) {
