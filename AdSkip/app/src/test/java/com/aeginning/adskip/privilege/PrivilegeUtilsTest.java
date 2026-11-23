@@ -40,6 +40,14 @@ public class PrivilegeUtilsTest {
         assertEquals("com.example.app", PrivilegeUtils.extractForegroundPackage("com.example.app"));
     }
 
+    @Test public void topResumedParserIgnoresPausedActivities() {
+        assertEquals("", PrivilegeUtils.extractTopResumedPackage(
+                "mLastPausedActivity: ActivityRecord{12 x u0 com.example.paused/.MainActivity}"));
+        assertEquals("com.example.foreground", PrivilegeUtils.extractTopResumedPackage(
+                "mLastPausedActivity: ActivityRecord{9 x u0 com.example.old/.OldActivity}\\n"
+                        + "topResumedActivity=ActivityRecord{12 y u0 com.example.foreground/.HomeActivity}"));
+    }
+
     @Test public void foregroundPackageParserNeverGuessesFromArbitraryText() {
         assertEquals("", PrivilegeUtils.extractForegroundPackage(null));
         assertEquals("", PrivilegeUtils.extractForegroundPackage("no resumed activity"));
