@@ -18,30 +18,30 @@ public class PrivilegeProbePolicyTest {
 
     @Test public void newlyEnabledForegroundAppIsProbedWithoutReopeningIt() {
         assertTrue(PrivilegeProbePolicy.shouldProbeForeground(
-                "com.example.app", false, "com.example.app", true, "com.aeginning.adskip"));
+                "com.example.app", false, "com.example.app", true));
     }
 
     @Test public void unchangedEnabledForegroundAppIsNotRepeatedlyReprobed() {
         assertFalse(PrivilegeProbePolicy.shouldProbeForeground(
-                "com.example.app", true, "com.example.app", true, "com.aeginning.adskip"));
+                "com.example.app", true, "com.example.app", true));
     }
 
     @Test public void packageSwitchToEnabledAppStartsAProbe() {
         assertTrue(PrivilegeProbePolicy.shouldProbeForeground(
-                "com.example.old", false, "com.example.new", true, "com.aeginning.adskip"));
+                "com.example.old", false, "com.example.new", true));
     }
 
     @Test public void disabledStateTransitionIsRememberedWithoutStartingRecognition() {
         assertTrue(PrivilegeProbePolicy.shouldProbeForeground(
-                "com.example.app", true, "com.example.app", false, "com.aeginning.adskip"));
+                "com.example.app", true, "com.example.app", false));
         assertFalse(PrivilegeProbePolicy.shouldProbeForeground(
-                "com.example.app", false, "com.example.app", false, "com.aeginning.adskip"));
+                "com.example.app", false, "com.example.app", false));
     }
 
     @Test public void ownAppTransitionIsRecordedSoReturnToTargetCanBeDetected() {
         assertTrue(PrivilegeProbePolicy.shouldProbeForeground(
-                "com.example.app", true, "com.aeginning.adskip", false, "com.aeginning.adskip"));
+                "com.example.app", true, "com.aeginning.adskip", false));
         assertTrue(PrivilegeProbePolicy.shouldProbeForeground(
-                "com.aeginning.adskip", false, "com.example.app", true, "com.aeginning.adskip"));
+                "com.aeginning.adskip", false, "com.example.app", true));
     }
 }
