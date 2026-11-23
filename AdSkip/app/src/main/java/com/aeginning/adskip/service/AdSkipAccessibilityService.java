@@ -230,6 +230,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         boolean windowIdentityEvent = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED;
         if (windowIdentityEvent) {
+            if (isUserLaunchOnlyModeEnabled()) {
+                // Revoke the prior app's authorization as soon as any other package
+                // becomes the foreground window; a later notification/deep-link return
+                // cannot reuse an old launcher authorization.
+                userLaunchTracker.onForegroundChanged(pkg);
+            }
             int eventWindowId = event.getWindowId();
             CharSequence classNameValue = event.getClassName();
             String eventClass = classNameValue == null ? "" : classNameValue.toString().trim();
@@ -1410,6 +1416,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 : ExtremeSkipPolicy.visualProbeIntervalMs(extreme, isRiskModeEnabled());
         if (now - lastOcrAt < interval) {
             logDiagnostic(expectedPackage, "OCR_THROTTLED", "OCR 截图间隔未达到限制，已节流");
+            return;
+        }
+        // A pending/latest-wins request may resume after a foreground transition without
+        // a reliable window-state event on some OEM builds. Verify the actual active window
+        // package before taking another screenshot, not only before clicking the candidate.
+        if (!isActiveWindowSafeForTarget(expectedPackage, generation)) {
+            logDiagnostic(expectedPackage, "OCR_FOREGROUND_REVALIDATION_FAILED",
+                    "截图前实时活动窗口包名、应用扫描许可或敏感输入复核未通过");
             return;
         }
         if (!tryBeginOcrWork(expectedPackage)) {
