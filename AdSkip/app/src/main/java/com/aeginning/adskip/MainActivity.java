@@ -81,6 +81,28 @@ public final class MainActivity extends Activity {
         privilegeManager.addListener(privilegeListener);
         privilegeManager.acquire();
         buildUi();
+        requestSuccessNotificationPermissionIfNeeded();
+    }
+
+    private void requestSuccessNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < 33
+                || !getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("interception_success_notifications_enabled", true)
+                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        android.content.SharedPreferences prefs =
+                getSharedPreferences("adskip_settings", MODE_PRIVATE);
+        if (prefs.getBoolean("success_notification_permission_prompted", false)) return;
+        prefs.edit().putBoolean("success_notification_permission_prompted", true).apply();
+        mainHandler.postDelayed(() -> {
+            if (!isFinishing() && successNotificationSwitch != null
+                    && successNotificationSwitch.isChecked()
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        REQUEST_SUCCESS_NOTIFICATION_PERMISSION);
+            }
+        }, 650L);
     }
 
     @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
