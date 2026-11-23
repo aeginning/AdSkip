@@ -46,7 +46,7 @@ public final class PrivilegeUtils {
         String trimmed = output.trim();
         if (isValidPackageName(trimmed)) return trimmed;
         java.util.regex.Matcher matcher = Pattern.compile(
-                "([A-Za-z][A-Za-z0-9_]*(?:\\\\.[A-Za-z][A-Za-z0-9_]*)+)/"
+                "([A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+)/"
                         + "(?:[A-Za-z0-9_.$]+)").matcher(trimmed);
         while (matcher.find()) {
             String candidate = matcher.group(1);
