@@ -25,7 +25,10 @@ public final class PrivilegeProbePolicy {
                                                 String currentPackage, boolean currentEnabled,
                                                 String ownPackage) {
         String current = normalize(currentPackage);
-        if (current.isEmpty() || current.equals(normalize(ownPackage))) return false;
+        if (current.isEmpty()) return false;
+        // The caller also records the AdSkip package as the latest observation,
+        // but never treats it as a user target. This is necessary to notice a
+        // target app when the user returns after briefly opening AdSkip.
         String previous = normalize(previousPackage);
         // Report both package transitions and allow-list state transitions. The caller
         // records disabled states without probing, so a later false -> true change is seen.
