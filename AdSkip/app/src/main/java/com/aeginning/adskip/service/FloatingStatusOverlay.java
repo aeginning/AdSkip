@@ -101,7 +101,7 @@ final class FloatingStatusOverlay {
             if (lastDatabase != null) refresh(lastDatabase, true, true);
             return;
         }
-        int end = lastText.indexOf('\\n', start);
+        int end = lastText.indexOf('\n', start);
         if (end < 0) end = lastText.length();
         lastText = lastText.substring(0, start) + prefix + recognitionState + lastText.substring(end);
         details.setText(lastText);
