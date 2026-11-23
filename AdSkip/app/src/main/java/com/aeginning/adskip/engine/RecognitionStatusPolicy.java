@@ -15,6 +15,7 @@ public final class RecognitionStatusPolicy {
         switch (action) {
             case "SCAN":
             case "PRIVILEGED_FOREGROUND_DETECTED": return "正在扫描";
+            case "PRIVILEGED_NO_FOREGROUND_PACKAGE": return "等待前台应用信息";
             case "OCR_START": return "正在识别（OCR）";
             case "OCR_QUEUED":
             case "OCR_QUEUE_REPLACED":
