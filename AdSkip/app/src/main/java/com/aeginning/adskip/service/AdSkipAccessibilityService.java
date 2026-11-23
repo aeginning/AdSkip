@@ -12,6 +12,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.content.SharedPreferences;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -28,6 +32,8 @@ import com.aeginning.adskip.engine.SplashProbePolicy;
 import com.aeginning.adskip.engine.ExtremeSkipPolicy;
 import com.aeginning.adskip.engine.SkipWordLibrary;
 import com.aeginning.adskip.engine.OcrRegionPolicy;
+import com.aeginning.adskip.engine.AppScanPolicy;
+import com.aeginning.adskip.engine.UserLaunchTracker;
 import com.aeginning.adskip.engine.SkipLayoutPolicy;
 import com.aeginning.adskip.engine.PrivilegeProbePolicy;
 import com.aeginning.adskip.engine.RecognitionStatusPolicy;
@@ -48,6 +54,8 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -70,6 +78,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private final ExecutorService foregroundProbeExecutor = Executors.newSingleThreadExecutor();
     private final Object ocrStateLock = new Object();
     private final LatestWinsQueue<PendingOcrRequest> pendingOcrRequests = new LatestWinsQueue<>();
+    private final UserLaunchTracker userLaunchTracker = new UserLaunchTracker();
+    private final Set<String> homePackages = new HashSet<>();
+    private final Map<String, Integer> packageFlagsCache = new LinkedHashMap<>();
+    private final Map<String, String> packageLabelCache = new LinkedHashMap<>();
     private RuleDatabase database;
     private FloatingStatusOverlay floatingStatusOverlay;
     private PrivilegeManager privilegeManager;
@@ -123,8 +135,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         destroyed = false;
         database = new RuleDatabase(this);
         floatingStatusOverlay = new FloatingStatusOverlay(this);
+        refreshHomePackages();
         overlayPreferences = getSharedPreferences("adskip_settings", MODE_PRIVATE);
         overlayPreferenceListener = (preferences, key) -> {
+            if ("user_launch_only_mode_enabled".equals(key)) {
+                mainHandler.post(this::onUserLaunchModeChanged);
+            }
             if (key != null && (key.startsWith("floating_overlay_")
                     || "dns_active".equals(key) || "ocr_enabled".equals(key)
                     || "extreme_skip_mode".equals(key) || "risk_mode_enabled".equals(key))
