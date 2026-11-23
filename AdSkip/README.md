@@ -1,6 +1,6 @@
 # AdSkip 智能跳广告助手
 
-版本：**1.4.1**（Shizuku 前台探测与状态稳定性修复）
+版本：**1.4.2**（极限识别热路径优化）
 包名：`com.aeginning.adskip`
 技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
 最低系统：Android 8.0（API 26）
