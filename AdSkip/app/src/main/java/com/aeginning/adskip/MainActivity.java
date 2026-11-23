@@ -55,7 +55,7 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_VPN = 410;
     private static final int REQUEST_NOTIFICATIONS = 411;
     private static final int REQUEST_SUCCESS_NOTIFICATION_PERMISSION = 412;
-    private android.widget.Switch successNotificationSwitch;
+    private CompoundButton successNotificationSwitch;
     private RuleDatabase database;
     private TextView serviceStatus;
     private TextView appRuleStatus;
