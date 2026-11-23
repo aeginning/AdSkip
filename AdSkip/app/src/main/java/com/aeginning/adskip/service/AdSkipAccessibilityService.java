@@ -42,7 +42,6 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -365,7 +364,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
         List<AccessibilityNodeInfo> children = new ArrayList<>();
         try {
-            for (int i = 0; i < node.getChildCount(); i++) {
+            int childCount = node.getChildCount();
+            if (childCount > MAX_NODES) {
+                markNodeScanIncomplete("单个节点的子节点数超过 " + MAX_NODES);
+                childCount = MAX_NODES;
+            }
+            for (int i = 0; i < childCount; i++) {
                 AccessibilityNodeInfo child = node.getChild(i);
                 if (child != null) children.add(child);
             }
