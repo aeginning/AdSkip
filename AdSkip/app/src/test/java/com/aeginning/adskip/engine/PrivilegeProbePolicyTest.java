@@ -31,10 +31,15 @@ public class PrivilegeProbePolicyTest {
                 "com.example.old", false, "com.example.new", true, "com.aeginning.adskip"));
     }
 
-    @Test public void ownAppAndDisabledAppsAreNeverForegroundTargets() {
-        assertFalse(PrivilegeProbePolicy.shouldProbeForeground(
-                "com.example.old", false, "com.aeginning.adskip", false, "com.aeginning.adskip"));
+    @Test public void disabledStateTransitionIsRememberedWithoutStartingRecognition() {
+        assertTrue(PrivilegeProbePolicy.shouldProbeForeground(
+                "com.example.app", true, "com.example.app", false, "com.aeginning.adskip"));
         assertFalse(PrivilegeProbePolicy.shouldProbeForeground(
                 "com.example.app", false, "com.example.app", false, "com.aeginning.adskip"));
+    }
+
+    @Test public void ownAppIsNeverAUserForegroundTarget() {
+        assertFalse(PrivilegeProbePolicy.shouldProbeForeground(
+                "com.example.old", false, "com.aeginning.adskip", false, "com.aeginning.adskip"));
     }
 }
