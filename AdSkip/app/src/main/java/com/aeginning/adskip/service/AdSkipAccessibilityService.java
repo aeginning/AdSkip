@@ -137,8 +137,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         koreanRecognizer = TextRecognition.getClient(new KoreanTextRecognizerOptions.Builder().build());
         devanagariRecognizer = TextRecognition.getClient(new DevanagariTextRecognizerOptions.Builder().build());
         privilegeManager = PrivilegeManager.getInstance(this);
-        privilegeManager.acquire();
-        privilegeManagerAcquired = true;
+        if (!privilegeManagerAcquired) {
+            privilegeManager.acquire();
+            privilegeManagerAcquired = true;
+        }
         floatingStatusOverlay.refresh(database, true, true);
         scheduleForegroundProbe(350L);
         logDiagnostic("", "SERVICE_CONNECTED", "无障碍服务已连接；等待用户启用并打开目标应用");
@@ -678,6 +680,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void logDiagnostic(String packageName, String action, String reason) {
         if (destroyed || database == null || action == null) return;
+        updateRecognitionState(RecognitionStatusPolicy.fromDiagnostic(action));
         String safePackage = packageName == null ? "" : packageName;
         long interval;
         if ("SCAN".equals(action)) interval = 4_000L;
@@ -1032,6 +1035,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return;
         }
         PrivilegeManager.Status status = privilegeManager.refresh();
+        if (status.binderAlive && status.permissionGranted && !status.userServiceConnected) {
+            // Reconnect only an already-authorized UserService; never open a permission prompt here.
+            privilegeManager.bindUserService();
+            scheduleForegroundProbe(PrivilegeProbePolicy.retryWhenUnavailableMs());
+            return;
+        }
         if (!status.canUseEnhancedDiagnostics()) {
             // Do not open a permission prompt automatically; ordinary accessibility mode continues.
             scheduleForegroundProbe(PrivilegeProbePolicy.retryWhenUnavailableMs());
@@ -1075,12 +1084,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (packageName == null || packageName.trim().isEmpty()
                 || packageName.equals(getPackageName())) return;
         if (packageName.equals(lastPrivilegedForegroundPackage)) return;
-        lastPrivilegedForegroundPackage = packageName;
-
-        if (database == null || !database.isAppEnabled(packageName)) {
-            lastPrivilegedForegroundPackage = packageName;
-            return;
-        }
+        if (database == null || !database.isAppEnabled(packageName)) return;
         AccessibilityNodeInfo root = null;
         try {
             root = getRootInActiveWindow();
