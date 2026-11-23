@@ -27,6 +27,7 @@ import com.aeginning.adskip.engine.TargetStability;
 import com.aeginning.adskip.engine.SplashProbePolicy;
 import com.aeginning.adskip.engine.ExtremeSkipPolicy;
 import com.aeginning.adskip.engine.SkipWordLibrary;
+import com.aeginning.adskip.engine.SkipLayoutPolicy;
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions;
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions;
@@ -384,10 +385,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 }
                 int width = getResources().getDisplayMetrics().widthPixels;
                 int height = getResources().getDisplayMetrics().heightPixels;
+                boolean topRightSkipFallback = isTopRightSkipFallback(label, bounds, width, height);
                 AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(label, context,
                         clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
                         bounds.width(), bounds.height(), width, height,
-                        isCountdownClickEnabled(), minimumScore, customSkipWords);
+                        isCountdownClickEnabled(), minimumScore, customSkipWords, topRightSkipFallback);
                 int score = assessment.score;
                 if (score <= bestScore || score < minimumScore) {
                     lowConfidence++;
@@ -396,14 +398,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 }
                 if (!SafetyPolicy.isSafeTarget(bounds, width, height,
                         clickable.isClickable(), clickable.isEnabled(), clickable.isVisibleToUser(),
-                        label, context, isCountdownClickEnabled(), minimumScore, customSkipWords)) {
+                        label, context, isCountdownClickEnabled(), minimumScore,
+                        customSkipWords, topRightSkipFallback)) {
                     unsafe++;
                     if (firstRejection.isEmpty()) firstRejection = "目标未通过最终安全区域或高风险操作策略";
                     continue;
                 }
 
                 if (best != null && best.ownsNode) recycleNode(best.node);
-                best = new Candidate(clickable, target.owned, new Rect(bounds), label, score);
+                best = new Candidate(clickable, target.owned, new Rect(bounds), label, score,
+                        topRightSkipFallback);
                 bestScore = score;
                 selected = true;
             } finally {
@@ -434,7 +438,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     /** Two observations are required. The node is reacquired after the delay; stale nodes are never clicked. */
     private void scheduleNodeConfirmation(Candidate first, String packageName, long generation, String context) {
-        if (!isSecondConfirmationEnabled()) {
+        if (!isSecondConfirmationEnabled() && !first.requiresSecondConfirmation) {
             executeNodeCandidate(first, packageName, context, generation);
             return;
         }
@@ -510,7 +514,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         secondContext, second.node.isClickable(), second.node.isEnabled(),
                         second.node.isVisibleToUser(), second.bounds.width(), second.bounds.height(),
                         screenWidth, screenHeight, isCountdownClickEnabled(), minimumScore,
-                        getCustomSkipWords());
+                        getCustomSkipWords(), second.requiresSecondConfirmation);
                 if (!sameLabel || !sameArea
                         || !AdConfidenceScorer.canProceedAfterSecondObservation(
                                 firstAssessment, secondAssessment, minimumScore)) {
@@ -879,7 +883,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 getResources().getDisplayMetrics().heightPixels,
                 candidate.node.isClickable(), candidate.node.isEnabled(), candidate.node.isVisibleToUser(),
                 candidate.label, context, isCountdownClickEnabled(), minimumScore,
-                getCustomSkipWords())) {
+                getCustomSkipWords(), candidate.requiresSecondConfirmation)) {
             database.log(packageName, safeLogLabel(candidate.label), "BLOCKED",
                     "最终安全策略拒绝控件树候选；未执行点击");
             logDiagnostic(packageName, "CLICK_BLOCKED",
@@ -1067,19 +1071,23 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         boolean chinese = containsUnicodeScript(visibleText, Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS)
                 || "zh".equals(language);
 
-        if (japanese) addRecognizer(ordered, japaneseRecognizer);
-        if (korean) addRecognizer(ordered, koreanRecognizer);
-        if (devanagari) addRecognizer(ordered, devanagariRecognizer);
-        if (chinese) addRecognizer(ordered, chineseRecognizer);
-        if (!japanese && !korean && !devanagari && !chinese) {
+        // Keep the hot path to the best-fit local model plus a Latin fallback.
+        // Do not serialize unrelated Japanese/Korean/Devanagari models after a
+        // Chinese or English miss; that added several full inference passes.
+        if (japanese) {
+            addRecognizer(ordered, japaneseRecognizer);
+            if (chinese) addRecognizer(ordered, chineseRecognizer);
+        } else if (korean) {
+            addRecognizer(ordered, koreanRecognizer);
+            if (chinese) addRecognizer(ordered, chineseRecognizer);
+        } else if (devanagari) {
+            addRecognizer(ordered, devanagariRecognizer);
+        } else if (chinese) {
+            addRecognizer(ordered, chineseRecognizer);
+        } else {
             addRecognizer(ordered, latinRecognizer);
         }
-        // Bounded sequential fallback: only one model processes the bitmap at a time.
         addRecognizer(ordered, latinRecognizer);
-        addRecognizer(ordered, chineseRecognizer);
-        addRecognizer(ordered, japaneseRecognizer);
-        addRecognizer(ordered, koreanRecognizer);
-        addRecognizer(ordered, devanagariRecognizer);
         return ordered;
     }
 
@@ -1193,12 +1201,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                             String lineText = line.getText();
                             Rect box = line.getBoundingBox();
                             if (box == null || isSuppressedLabel(suppressedLabels, lineText)) continue;
+                            boolean topRightSkipFallback = isTopRightSkipFallback(
+                                    lineText, box, sourceWidth, sourceHeight);
                             AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                                     lineText, context, true, true, true, box.width(), box.height(),
                                     sourceWidth, sourceHeight,
-                                    allowCountdownClicks, getMinimumSkipScore(), customSkipWords);
+                                    allowCountdownClicks, getMinimumSkipScore(), customSkipWords,
+                                    topRightSkipFallback);
                             if (assessment.score >= getMinimumSkipScore() && assessment.score > bestScore) {
-                                best = new OcrCandidate(new Rect(box), lineText, assessment.score);
+                                best = new OcrCandidate(new Rect(box), lineText, assessment.score,
+                                        topRightSkipFallback);
                                 bestScore = assessment.score;
                             }
 
@@ -1297,6 +1309,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         return SkipWordLibrary.parse(saved);
     }
 
+    private boolean isTopRightSkipFallback(String label, Rect bounds,
+                                               int screenWidth, int screenHeight) {
+        return isExtremeSkipMode()
+                && TextMatcher.isGenericSkipLabel(label)
+                && bounds != null
+                && SkipLayoutPolicy.isTopRightSkipPill(
+                        bounds.left, bounds.top, bounds.right, bounds.bottom,
+                        screenWidth, screenHeight);
+    }
+
     private int getMinimumSkipScore() {
         return ExtremeSkipPolicy.minimumSkipScore(getSkipButtonSensitivity(), isExtremeSkipMode());
     }
@@ -1364,10 +1386,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 Math.round(candidate.bounds.bottom * scaleY));
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(candidate.label, context,
                 true, true, true, mapped.width(), mapped.height(), screenWidth, screenHeight,
-                isCountdownClickEnabled(), minimumScore, customSkipWords);
+                isCountdownClickEnabled(), minimumScore, customSkipWords,
+                candidate.requiresSecondConfirmation);
         if (assessment.score < minimumScore || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                 true, true, true, candidate.label, context,
-                isCountdownClickEnabled(), minimumScore, customSkipWords)) {
+                isCountdownClickEnabled(), minimumScore, customSkipWords,
+                candidate.requiresSecondConfirmation)) {
             database.log(expectedPackage, safeLogLabel(candidate.label), "BLOCKED",
                     "OCR 候选未通过置信度门槛或最终安全审核；未执行点击");
             logDiagnostic(expectedPackage, "OCR_BLOCKED",
@@ -1375,7 +1399,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return;
         }
 
-        if (!isSecondConfirmationEnabled()) {
+        if (!isSecondConfirmationEnabled() && !candidate.requiresSecondConfirmation) {
             if (!isActiveWindowSafeForTarget(expectedPackage, generation)
                     || !database.isAppEnabled(expectedPackage)
                     || SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) {
@@ -1594,7 +1618,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
                             AdConfidenceScorer.Assessment second = AdConfidenceScorer.assess(
                                     observedLabel, context, true, true, true, mapped.width(), mapped.height(),
-                                    screenWidth, screenHeight, isCountdownClickEnabled(), getMinimumSkipScore(), customSkipWords);
+                                    screenWidth, screenHeight, isCountdownClickEnabled(), getMinimumSkipScore(),
+                                    customSkipWords, isTopRightSkipFallback(
+                                            observedLabel, mapped, screenWidth, screenHeight));
                             AdConfidenceScorer.Assessment first = new AdConfidenceScorer.Assessment(
                                     firstScore, firstScore >= 90 ? AdConfidenceScorer.Level.HIGH
                                             : AdConfidenceScorer.Level.REVIEW, "首次 OCR 观察");
@@ -1604,7 +1630,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                                     || !SafetyPolicy.isSafeTarget(mapped, screenWidth, screenHeight,
                                             true, true, true, observedLabel, context,
                                             isCountdownClickEnabled(), getMinimumSkipScore(),
-                                            customSkipWords)) {
+                                            customSkipWords, isExtremeSkipMode())) {
                                 logDiagnostic(expectedPackage, "OCR_CONFIRM_BLOCKED",
                                         "二次 OCR 文字位置匹配，但置信度或最终安全策略未通过");
                                 continue;
@@ -1895,12 +1921,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         final Rect bounds;
         final String label;
         final int score;
-        Candidate(AccessibilityNodeInfo node, boolean ownsNode, Rect bounds, String label, int score) {
+        final boolean requiresSecondConfirmation;
+        Candidate(AccessibilityNodeInfo node, boolean ownsNode, Rect bounds, String label,
+                  int score, boolean requiresSecondConfirmation) {
             this.node = node;
             this.ownsNode = ownsNode;
             this.bounds = bounds;
             this.label = label;
             this.score = score;
+            this.requiresSecondConfirmation = requiresSecondConfirmation;
         }
     }
 
@@ -1917,8 +1946,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         final Rect bounds;
         final String label;
         final int score;
+        final boolean requiresSecondConfirmation;
         OcrCandidate(Rect bounds, String label, int score) {
+            this(bounds, label, score, false);
+        }
+        OcrCandidate(Rect bounds, String label, int score, boolean requiresSecondConfirmation) {
             this.bounds = bounds; this.label = label; this.score = score;
+            this.requiresSecondConfirmation = requiresSecondConfirmation;
         }
     }
 }
