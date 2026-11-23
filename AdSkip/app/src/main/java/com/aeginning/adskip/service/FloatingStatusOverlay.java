@@ -91,7 +91,20 @@ final class FloatingStatusOverlay {
         String next = state == null || state.trim().isEmpty() ? "状态未知" : state.trim();
         if (next.equals(recognitionState)) return;
         recognitionState = next;
-        if (attached && lastDatabase != null) refresh(lastDatabase, true, true);
+        // Update only the state row. Do not re-query app/DNS/statistics tables on
+        // every OCR transition, especially while high-frequency mode is enabled.
+        if (!attached || details == null
+                || !preferences.getBoolean(PREF_SHOW_RECOGNITION_STATE, true)) return;
+        String prefix = "当前识别状态：";
+        int start = lastText.indexOf(prefix);
+        if (start < 0) {
+            if (lastDatabase != null) refresh(lastDatabase, true, true);
+            return;
+        }
+        int end = lastText.indexOf('\\n', start);
+        if (end < 0) end = lastText.length();
+        lastText = lastText.substring(0, start) + prefix + recognitionState + lastText.substring(end);
+        details.setText(lastText);
     }
 
     void refresh(RuleDatabase database, boolean serviceAvailable, boolean force) {
