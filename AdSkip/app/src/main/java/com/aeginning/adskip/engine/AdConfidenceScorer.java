@@ -153,7 +153,8 @@ public final class AdConfidenceScorer {
     }
 
     private static boolean containsAny(String value, String... tokens) {
-        for (String token : tokens) if (value.contains(normalize(token))) return true;
+        // All scorer-owned tokens are source-normalized ASCII or CJK literals.
+        for (String token : tokens) if (value.contains(token)) return true;
         return false;
     }
 
