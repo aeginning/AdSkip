@@ -133,9 +133,12 @@ public final class TextMatcher {
 
     /** Custom phrases are positive hints only; negative and dangerous labels can never match. */
     public static boolean isCustomSkipPhrase(String text, List<String> customWords) {
-        String value = normalize(text);
-        if (value.isEmpty() || isNegativeSkip(value) || isDangerous(value)
-                || isCloseGlyph(value)) return false;
+        return isCustomSkipPhraseNormalized(normalize(text), customWords);
+    }
+
+    static boolean isCustomSkipPhraseNormalized(String value, List<String> customWords) {
+        if (value.isEmpty() || isNegativeSkipNormalized(value)
+                || isDangerousNormalized(value) || isCloseGlyphNormalized(value)) return false;
         return SkipWordLibrary.matches(value, customWords);
     }
 
@@ -151,11 +154,19 @@ public final class TextMatcher {
     }
 
     public static boolean isExplicitSkipAd(String text) {
-        return containsAny(normalize(text), EXPLICIT_SKIP_AD);
+        return isExplicitSkipAdNormalized(normalize(text));
+    }
+
+    static boolean isExplicitSkipAdNormalized(String value) {
+        return containsAny(value, EXPLICIT_SKIP_AD);
     }
 
     public static boolean isExplicitCloseAd(String text) {
-        return containsAny(normalize(text), EXPLICIT_CLOSE_AD);
+        return isExplicitCloseAdNormalized(normalize(text));
+    }
+
+    static boolean isExplicitCloseAdNormalized(String value) {
+        return containsAny(value, EXPLICIT_CLOSE_AD);
     }
 
     /** Exact visual close glyphs commonly used by splash ads. Geometry and ad context
@@ -215,7 +226,11 @@ public final class TextMatcher {
 
     /** Returns true when the surrounding screen contains any purchase, permission or account flow. */
     public static boolean hasCriticalActionContext(String text) {
-        return containsAny(normalize(text), CRITICAL_ACTION_CONTEXT);
+        return hasCriticalActionContextNormalized(normalize(text));
+    }
+
+    static boolean hasCriticalActionContextNormalized(String value) {
+        return containsAny(value, CRITICAL_ACTION_CONTEXT);
     }
 
     public static boolean isCountdown(String text) {
