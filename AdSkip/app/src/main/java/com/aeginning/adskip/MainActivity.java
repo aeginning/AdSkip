@@ -740,7 +740,11 @@ public final class MainActivity extends Activity {
 
     private void showChangelogDialog() {
         String changelog =
-                "AdSkip " + getAppVersionName() + " · 极限识别热路径优化\n\n"
+                "AdSkip " + getAppVersionName() + " · 拦截成功通知与 DNS 响应确认\n\n"
+                + "• 新增广告跳过成功通知：只有点击后页面验证确认广告候选消失或前台页面已离开才通知；仅派发点击请求、验证未知或点击无效均不通知。\n"
+                + "• 新增 DNS 拦截成功通知：只有 NXDOMAIN 拦截响应成功写入本地 VPN 通道后才通知。\n"
+                + "• 通知总开关默认开启；Android 13 及以上首次使用时请求通知权限。广告跳过与 DNS 两类通知分别更新并显示累计次数，避免高频 DNS 请求堆满通知栏。\n"
+                + "• 通知权限被拒绝或用户关闭总开关时，不影响广告识别与 DNS 拦截。\n\n"
                 + "• 风险模式继续提速：事件扫描约 30ms、广告 OCR 触发约 85ms、倒计时重扫约 40ms、二次确认约 30ms、开屏探测首轮约 40ms；Shizuku 前台探测约 200ms。所有循环均有次数上限。\n"
                 + "• 优化控件树候选排序：每个子节点只计算一次优先级，叶子节点不再创建空列表，减少 Accessibility 跨进程读取与短命对象。\n"
                 + "• 文字匹配预编译倒计时、广告上下文、零宽字符和空白正则；候选评分复用已归一化的文字与页面上下文。\n"
