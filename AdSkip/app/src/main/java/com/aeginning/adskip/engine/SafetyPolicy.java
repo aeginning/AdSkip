@@ -48,6 +48,21 @@ public final class SafetyPolicy {
                                        String candidateText, String surroundingText,
                                        boolean allowCountdownSkip, int minimumScore,
                                        List<String> customSkipWords, boolean allowTopRightSkipFallback) {
+        return isSafeTarget(bounds, screenWidth, screenHeight, clickable, enabled, visible,
+                candidateText, surroundingText, allowCountdownSkip, minimumScore,
+                customSkipWords, allowTopRightSkipFallback, null);
+    }
+
+    /**
+     * Reuses a score already computed for this exact candidate/context pair.
+     * All final geometry and hard-risk checks still run here on every call.
+     */
+    public static boolean isSafeTarget(Rect bounds, int screenWidth, int screenHeight,
+                                       boolean clickable, boolean enabled, boolean visible,
+                                       String candidateText, String surroundingText,
+                                       boolean allowCountdownSkip, int minimumScore,
+                                       List<String> customSkipWords, boolean allowTopRightSkipFallback,
+                                       AdConfidenceScorer.Assessment precomputedAssessment) {
         if (bounds == null || screenWidth <= 0 || screenHeight <= 0) return false;
         if (bounds.isEmpty() || bounds.left < 0 || bounds.top < 0
                 || bounds.right > screenWidth || bounds.bottom > screenHeight) return false;
@@ -90,10 +105,11 @@ public final class SafetyPolicy {
         // A lone X is accepted only as a small, top-right ad close affordance.
         if (TextMatcher.isCloseGlyph(candidateText) && !topRightCloseGlyph) return false;
 
-        AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
-                candidateText, surroundingText, clickable, enabled, visible,
-                bounds.width(), bounds.height(), screenWidth, screenHeight,
-                allowCountdownSkip, minimumScore, customSkipWords, topRightSkipPill);
+        AdConfidenceScorer.Assessment assessment = precomputedAssessment != null
+                ? precomputedAssessment
+                : AdConfidenceScorer.assess(candidateText, surroundingText, clickable, enabled, visible,
+                        bounds.width(), bounds.height(), screenWidth, screenHeight,
+                        allowCountdownSkip, minimumScore, customSkipWords, topRightSkipPill);
         return assessment.score >= Math.max(50, Math.min(95, minimumScore))
                 && !TextMatcher.isDangerous(candidateText)
                 && !TextMatcher.hasCriticalActionContext(surroundingText);
