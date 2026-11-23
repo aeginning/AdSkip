@@ -6,11 +6,20 @@ import android.content.pm.PackageManager;
 import android.content.ServiceConnection;
 import android.os.IBinder;
 
+import java.util.concurrent.CopyOnWriteArrayList;
+
 import rikka.shizuku.Shizuku;
 
 /** Owns Shizuku Binder, permission and UserService lifecycle. */
 public final class PrivilegeManager {
     public static final int REQUEST_PERMISSION_CODE = 772;
+    private static volatile PrivilegeManager instance;
+
+    /** One Binder/UserService owner shared by the Activity and AccessibilityService. */
+    public static synchronized PrivilegeManager getInstance(Context context) {
+        if (instance == null) instance = new PrivilegeManager(context, null);
+        return instance;
+    }
 
     public interface Listener {
         void onPrivilegeStateChanged(Status status);
@@ -57,7 +66,7 @@ public final class PrivilegeManager {
     }
 
     private final Context appContext;
-    private final Listener listener;
+    private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private boolean listenersRegistered;
     private boolean bindRequested;
     private IAdSkipShellService shellService;
@@ -111,7 +120,7 @@ public final class PrivilegeManager {
 
     public PrivilegeManager(Context context, Listener listener) {
         this.appContext = context.getApplicationContext();
-        this.listener = listener;
+        if (listener != null) listeners.addIfAbsent(listener);
         this.userServiceArgs = new Shizuku.UserServiceArgs(
                 new ComponentName(appContext, AdSkipShellUserService.class))
                 .tag("adskip-readonly-diagnostics")
@@ -119,6 +128,17 @@ public final class PrivilegeManager {
                 .processNameSuffix("adskip_diagnostics")
                 .debuggable(false)
                 .daemon(false);
+    }
+
+    public void addListener(Listener listener) {
+        if (listener != null) {
+            listeners.addIfAbsent(listener);
+            if (listenersRegistered) listener.onPrivilegeStateChanged(refresh());
+        }
+    }
+
+    public void removeListener(Listener listener) {
+        if (listener != null) listeners.remove(listener);
     }
 
     public synchronized void start() {
@@ -288,6 +308,10 @@ public final class PrivilegeManager {
     }
 
     private void notifyChanged() {
-        if (listener != null) listener.onPrivilegeStateChanged(refresh());
+        Status status = refresh();
+        for (Listener listener : listeners) {
+            try { listener.onPrivilegeStateChanged(status); }
+            catch (RuntimeException ignored) { }
+        }
     }
 }
