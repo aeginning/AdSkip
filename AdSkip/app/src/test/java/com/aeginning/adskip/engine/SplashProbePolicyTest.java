@@ -42,11 +42,11 @@ public class SplashProbePolicyTest {
     }
 
     @Test public void riskProbeScheduleIsFasterAndStillHasAHardAttemptLimit() {
-        assertEquals(55L, SplashProbePolicy.delayForAttempt(0, true, true));
-        assertEquals(90L, SplashProbePolicy.delayForAttempt(1, true, true));
-        assertEquals(100L, SplashProbePolicy.ocrIntervalMs(true, true));
-        assertTrue(SplashProbePolicy.hasMoreAttempts(31, true, true));
-        assertFalse(SplashProbePolicy.hasMoreAttempts(32, true, true));
+        assertEquals(40L, SplashProbePolicy.delayForAttempt(0, true, true));
+        assertEquals(60L, SplashProbePolicy.delayForAttempt(1, true, true));
+        assertEquals(80L, SplashProbePolicy.ocrIntervalMs(true, true));
+        assertTrue(SplashProbePolicy.hasMoreAttempts(39, true, true));
+        assertFalse(SplashProbePolicy.hasMoreAttempts(40, true, true));
     }
 
     @Test public void extremeProbeScheduleIsFasterButStillBounded() {
@@ -57,13 +57,4 @@ public class SplashProbePolicyTest {
         assertTrue(SplashProbePolicy.hasMoreAttempts(23, true));
         assertFalse(SplashProbePolicy.hasMoreAttempts(24, true));
     }
-    @Test public void riskModeUsesFasterButBoundedProbes() {
-        assertEquals(40L, SplashProbePolicy.delayForAttempt(0, true, true));
-        assertEquals(60L, SplashProbePolicy.delayForAttempt(1, true, true));
-        assertEquals(80L, SplashProbePolicy.ocrIntervalMs(true, true));
-        assertEquals(40, SplashProbePolicy.RISK_MAX_ATTEMPTS);
-        assertTrue(SplashProbePolicy.hasMoreAttempts(39, true, true));
-        assertFalse(SplashProbePolicy.hasMoreAttempts(40, true, true));
-    }
-
 }
