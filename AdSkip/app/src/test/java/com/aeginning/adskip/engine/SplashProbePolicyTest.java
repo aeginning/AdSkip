@@ -41,6 +41,14 @@ public class SplashProbePolicyTest {
         assertFalse(SplashProbePolicy.hasMoreAttempts(6));
     }
 
+    @Test public void riskProbeScheduleIsFasterAndStillHasAHardAttemptLimit() {
+        assertEquals(55L, SplashProbePolicy.delayForAttempt(0, true, true));
+        assertEquals(90L, SplashProbePolicy.delayForAttempt(1, true, true));
+        assertEquals(100L, SplashProbePolicy.ocrIntervalMs(true, true));
+        assertTrue(SplashProbePolicy.hasMoreAttempts(31, true, true));
+        assertFalse(SplashProbePolicy.hasMoreAttempts(32, true, true));
+    }
+
     @Test public void extremeProbeScheduleIsFasterButStillBounded() {
         assertEquals(100L, SplashProbePolicy.delayForAttempt(0, true));
         assertEquals(160L, SplashProbePolicy.delayForAttempt(1, true));

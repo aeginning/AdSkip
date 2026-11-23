@@ -28,6 +28,11 @@ import com.aeginning.adskip.engine.SplashProbePolicy;
 import com.aeginning.adskip.engine.ExtremeSkipPolicy;
 import com.aeginning.adskip.engine.SkipWordLibrary;
 import com.aeginning.adskip.engine.SkipLayoutPolicy;
+import com.aeginning.adskip.engine.PrivilegeProbePolicy;
+import com.aeginning.adskip.engine.RecognitionStatusPolicy;
+import com.aeginning.adskip.privilege.PrivilegeManager;
+import com.aeginning.adskip.privilege.PrivilegeUtils;
+import com.aeginning.adskip.privilege.IAdSkipShellService;
 import com.aeginning.adskip.engine.LatestWinsQueue;
 import com.aeginning.adskip.engine.WindowSessionPolicy;
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions;
@@ -61,10 +66,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService screenshotExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService foregroundProbeExecutor = Executors.newSingleThreadExecutor();
     private final Object ocrStateLock = new Object();
     private final LatestWinsQueue<PendingOcrRequest> pendingOcrRequests = new LatestWinsQueue<>();
     private RuleDatabase database;
     private FloatingStatusOverlay floatingStatusOverlay;
+    private PrivilegeManager privilegeManager;
+    private boolean privilegeManagerAcquired;
+    private Runnable pendingForegroundProbe;
+    private volatile boolean foregroundProbeInFlight;
+    private String lastPrivilegedForegroundPackage = "";
     private SharedPreferences overlayPreferences;
     private SharedPreferences.OnSharedPreferenceChangeListener overlayPreferenceListener;
     private TextRecognizer chineseRecognizer;
@@ -110,7 +121,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         overlayPreferenceListener = (preferences, key) -> {
             if (key != null && (key.startsWith("floating_overlay_")
                     || "dns_active".equals(key) || "ocr_enabled".equals(key)
-                    || "extreme_skip_mode".equals(key))
+                    || "extreme_skip_mode".equals(key) || "risk_mode_enabled".equals(key))
                     && floatingStatusOverlay != null) {
                 mainHandler.post(() -> {
                     if (!destroyed && floatingStatusOverlay != null) {
@@ -125,7 +136,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         japaneseRecognizer = TextRecognition.getClient(new JapaneseTextRecognizerOptions.Builder().build());
         koreanRecognizer = TextRecognition.getClient(new KoreanTextRecognizerOptions.Builder().build());
         devanagariRecognizer = TextRecognition.getClient(new DevanagariTextRecognizerOptions.Builder().build());
+        privilegeManager = PrivilegeManager.getInstance(this);
+        if (!privilegeManagerAcquired) {
+            privilegeManager.acquire();
+            privilegeManagerAcquired = true;
+        }
         floatingStatusOverlay.refresh(database, true, true);
+        scheduleForegroundProbe(350L);
         logDiagnostic("", "SERVICE_CONNECTED", "无障碍服务已连接；等待用户启用并打开目标应用");
     }
 
@@ -240,7 +257,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
 
         long now = SystemClock.elapsedRealtime();
-        if (now - lastScanAt < ExtremeSkipPolicy.eventIntervalMs(isExtremeSkipMode())) {
+        if (now - lastScanAt < ExtremeSkipPolicy.eventIntervalMs(
+                isExtremeSkipMode(), isRiskModeEnabled())) {
             recycleNode(fallbackRoot);
             logDiagnostic(pkg, "SCAN_THROTTLED", "短时间收到重复无障碍事件，已合并扫描以降低耗电");
             return;
@@ -657,11 +675,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
         };
         mainHandler.postDelayed(pendingNodeConfirmation,
-                ExtremeSkipPolicy.confirmationDelayMs(isExtremeSkipMode()));
+                ExtremeSkipPolicy.confirmationDelayMs(isExtremeSkipMode(), isRiskModeEnabled()));
     }
 
     private void logDiagnostic(String packageName, String action, String reason) {
         if (destroyed || database == null || action == null) return;
+        updateRecognitionState(RecognitionStatusPolicy.fromDiagnostic(action));
         String safePackage = packageName == null ? "" : packageName;
         long interval;
         if ("SCAN".equals(action)) interval = 4_000L;
@@ -713,7 +732,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             countdownRescanAttempts = 0;
         }
         if (pendingCountdownRescan != null) return;
-        int maxRescans = ExtremeSkipPolicy.maxCountdownRescans(isExtremeSkipMode());
+        int maxRescans = ExtremeSkipPolicy.maxCountdownRescans(
+                isExtremeSkipMode(), isRiskModeEnabled());
         if (countdownRescanAttempts >= maxRescans) {
             logDiagnostic(packageName, "COUNTDOWN_TIMEOUT",
                     "主动扫描达到 " + maxRescans + " 次上限，未发现可安全点击按钮；未执行点击");
@@ -794,7 +814,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             }
         };
         mainHandler.postDelayed(pendingCountdownRescan,
-                ExtremeSkipPolicy.countdownRescanIntervalMs(isExtremeSkipMode()));
+                ExtremeSkipPolicy.countdownRescanIntervalMs(
+                        isExtremeSkipMode(), isRiskModeEnabled()));
     }
 
     private void cancelPendingSplashProbe() {
@@ -820,13 +841,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
         if (pendingSplashProbe != null) return;
         boolean extreme = isExtremeSkipMode();
-        if (!SplashProbePolicy.hasMoreAttempts(splashProbeAttempts, extreme)) {
+        if (!SplashProbePolicy.hasMoreAttempts(splashProbeAttempts, extreme, isRiskModeEnabled())) {
             logDiagnostic(packageName, "SPLASH_PROBE_FINISHED",
                     "开屏主动探测达到有限次数上限；后续交由普通事件和低频视觉探测处理");
             cancelPendingSplashProbe();
             return;
         }
-        long delay = SplashProbePolicy.delayForAttempt(splashProbeAttempts, extreme);
+        long delay = SplashProbePolicy.delayForAttempt(
+                splashProbeAttempts, extreme, isRiskModeEnabled());
         pendingSplashProbe = () -> {
             pendingSplashProbe = null;
             splashProbeAttempts++;
@@ -986,6 +1008,137 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (floatingStatusOverlay != null) floatingStatusOverlay.refresh(database, true, force);
     }
 
+    private void updateRecognitionState(String state) {
+        if (state == null || state.trim().isEmpty()) return;
+        mainHandler.post(() -> {
+            if (!destroyed && floatingStatusOverlay != null) {
+                floatingStatusOverlay.setRecognitionState(state);
+            }
+        });
+    }
+
+    /** Poll the top-resumed package through Shizuku only after an existing user grant. */
+    private void scheduleForegroundProbe(long delayMs) {
+        if (destroyed || privilegeManager == null) return;
+        if (pendingForegroundProbe != null) mainHandler.removeCallbacks(pendingForegroundProbe);
+        pendingForegroundProbe = () -> {
+            pendingForegroundProbe = null;
+            runForegroundProbe();
+        };
+        mainHandler.postDelayed(pendingForegroundProbe, Math.max(100L, delayMs));
+    }
+
+    private void runForegroundProbe() {
+        if (destroyed || privilegeManager == null) return;
+        if (foregroundProbeInFlight) {
+            scheduleForegroundProbe(PrivilegeProbePolicy.retryWhenUnavailableMs());
+            return;
+        }
+        PrivilegeManager.Status status = privilegeManager.refresh();
+        if (status.binderAlive && status.permissionGranted && !status.userServiceConnected) {
+            // Reconnect only an already-authorized UserService; never open a permission prompt here.
+            privilegeManager.bindUserService();
+            scheduleForegroundProbe(PrivilegeProbePolicy.retryWhenUnavailableMs());
+            return;
+        }
+        if (!status.canUseEnhancedDiagnostics()) {
+            // Do not open a permission prompt automatically; ordinary accessibility mode continues.
+            scheduleForegroundProbe(PrivilegeProbePolicy.retryWhenUnavailableMs());
+            return;
+        }
+        foregroundProbeInFlight = true;
+        try {
+            foregroundProbeExecutor.execute(() -> {
+                String foregroundPackage = "";
+                String failureReason = "";
+                try {
+                    IAdSkipShellService shell = privilegeManager.requireShellService();
+                    foregroundPackage = PrivilegeUtils.extractForegroundPackage(shell.getForegroundPackage());
+                } catch (Exception failure) {
+                    failureReason = failure.getClass().getSimpleName();
+                }
+                final String resultPackage = foregroundPackage;
+                final String resultFailure = failureReason;
+                mainHandler.post(() -> {
+                    foregroundProbeInFlight = false;
+                    if (destroyed) return;
+                    if (!resultFailure.isEmpty()) {
+                        logDiagnostic("", "PRIVILEGED_PROBE_ERROR",
+                                "Shizuku 前台窗口读取失败：" + resultFailure + "；继续使用无障碍事件");
+                    } else if (!resultPackage.isEmpty()) {
+                        handlePrivilegedForegroundPackage(resultPackage);
+                    }
+                    scheduleForegroundProbe(PrivilegeProbePolicy.intervalMs(
+                            isExtremeSkipMode(), isRiskModeEnabled()));
+                });
+            });
+        } catch (RuntimeException rejected) {
+            foregroundProbeInFlight = false;
+            logDiagnostic("", "PRIVILEGED_PROBE_ERROR",
+                    "Shizuku 前台探测线程不可用；继续使用无障碍事件");
+            scheduleForegroundProbe(PrivilegeProbePolicy.retryWhenUnavailableMs());
+        }
+    }
+
+    private void handlePrivilegedForegroundPackage(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()) return;
+        if (packageName.equals(lastPrivilegedForegroundPackage)) return;
+        if (packageName.equals(getPackageName()) || database == null
+                || !database.isAppEnabled(packageName)) {
+            // Remember non-target foreground packages so returning to an enabled app
+            // is treated as a fresh launch and gets an immediate probe.
+            lastPrivilegedForegroundPackage = packageName;
+            return;
+        }
+        AccessibilityNodeInfo root = null;
+        try {
+            root = getRootInActiveWindow();
+        } catch (Throwable failure) {
+            logDiagnostic(packageName, "PRIVILEGED_NO_WINDOW",
+                    "Shizuku 已检测到前台应用，但 Android 尚未提供活动无障碍窗口");
+            return;
+        }
+        if (root == null) {
+            logDiagnostic(packageName, "PRIVILEGED_NO_WINDOW",
+                    "Shizuku 已检测到前台应用，但活动窗口暂时不可读");
+            return;
+        }
+        try {
+            CharSequence rootPackage = root.getPackageName();
+            if (rootPackage == null || !packageName.contentEquals(rootPackage)) {
+                logDiagnostic(packageName, "PRIVILEGED_WINDOW_MISMATCH",
+                        "Shell 前台包名与实时无障碍窗口不一致；不以 Shell 结果代替活动窗口");
+                return;
+            }
+            lastPrivilegedForegroundPackage = packageName;
+            CharSequence classNameValue = root.getClassName();
+            String currentClass = classNameValue == null ? "" : classNameValue.toString();
+            int currentWindowId = root.getWindowId();
+            boolean newSession = WindowSessionPolicy.isNewSession(
+                    activeWindowPackage, packageName, activeWindowClass, currentClass,
+                    activeWindowId, currentWindowId, true);
+            if (newSession) {
+                windowGeneration++;
+                cancelPendingNodeConfirmation();
+                cancelPendingCountdownRescan();
+                cancelPendingSplashProbe();
+            }
+            activeWindowPackage = packageName;
+            if (!currentClass.isEmpty()) activeWindowClass = currentClass;
+            if (currentWindowId >= 0) activeWindowId = currentWindowId;
+            logDiagnostic(packageName, "PRIVILEGED_FOREGROUND_DETECTED",
+                    "Shizuku 检测到已启用应用位于 resumed 前台，且与实时无障碍窗口一致；启动快速探测");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                scheduleSplashProbe(packageName, windowGeneration);
+            } else {
+                logDiagnostic(packageName, "PRIVILEGED_TREE_ONLY",
+                        "当前 Android 版本不支持截图 OCR；继续使用无障碍控件树识别");
+            }
+        } finally {
+            recycleNode(root);
+        }
+    }
+
     private void executeNodeCandidate(Candidate candidate, String packageName, String context,
                                        long generation) {
         if (destroyed || generation != windowGeneration || database == null
@@ -1132,9 +1285,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
         long now = SystemClock.elapsedRealtime();
         boolean extreme = isExtremeSkipMode();
-        long interval = adContext ? ExtremeSkipPolicy.adOcrIntervalMs(extreme)
-                : splashProbe ? SplashProbePolicy.ocrIntervalMs(extreme)
-                : ExtremeSkipPolicy.visualProbeIntervalMs(extreme);
+        long interval = adContext
+                ? ExtremeSkipPolicy.adOcrIntervalMs(extreme, isRiskModeEnabled())
+                : splashProbe ? SplashProbePolicy.ocrIntervalMs(extreme, isRiskModeEnabled())
+                : ExtremeSkipPolicy.visualProbeIntervalMs(extreme, isRiskModeEnabled());
         if (now - lastOcrAt < interval) {
             logDiagnostic(expectedPackage, "OCR_THROTTLED", "OCR 截图间隔未达到限制，已节流");
             return;
@@ -1525,9 +1679,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 .getInt("skip_button_sensitivity", 50)));
     }
 
+    private boolean isRiskModeEnabled() {
+        return getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("risk_mode_enabled", false);
+    }
+
     private boolean isExtremeSkipMode() {
         return getSharedPreferences("adskip_settings", MODE_PRIVATE)
-                .getBoolean("extreme_skip_mode", false);
+                .getBoolean("extreme_skip_mode", false) || isRiskModeEnabled();
     }
 
     private List<String> getCustomSkipWords() {
@@ -1549,7 +1708,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private int getMinimumSkipScore() {
-        return ExtremeSkipPolicy.minimumSkipScore(getSkipButtonSensitivity(), isExtremeSkipMode());
+        return ExtremeSkipPolicy.minimumSkipScore(
+                getSkipButtonSensitivity(), isExtremeSkipMode(), isRiskModeEnabled());
     }
 
     private boolean isSecondConfirmationEnabled() {
@@ -1748,7 +1908,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                         "请求二次截图异常：" + failure.getClass().getSimpleName());
                 finishOcrWork();
             }
-        }, ExtremeSkipPolicy.confirmationDelayMs(isExtremeSkipMode()));
+        }, ExtremeSkipPolicy.confirmationDelayMs(isExtremeSkipMode(), isRiskModeEnabled()));
     }
 
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
@@ -2145,6 +2305,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (devanagariRecognizer != null) devanagariRecognizer.close();
         diagnosticThrottle.clear();
         if (database != null) database.close();
+        if (pendingForegroundProbe != null) mainHandler.removeCallbacks(pendingForegroundProbe);
+        foregroundProbeExecutor.shutdownNow();
+        foregroundProbeInFlight = false;
+        if (privilegeManager != null && privilegeManagerAcquired) privilegeManager.release();
+        privilegeManagerAcquired = false;
+        privilegeManager = null;
         screenshotExecutor.shutdownNow();
         super.onDestroy();
     }

@@ -11,30 +11,60 @@ public final class ExtremeSkipPolicy {
     private ExtremeSkipPolicy() { }
 
     public static long eventIntervalMs(boolean extreme) {
-        return extreme ? 70L : 350L;
+        return eventIntervalMs(extreme, false);
+    }
+
+    public static long eventIntervalMs(boolean extreme, boolean riskMode) {
+        return riskMode ? 45L : extreme ? 70L : 350L;
     }
 
     public static long adOcrIntervalMs(boolean extreme) {
-        return extreme ? 170L : 850L;
+        return adOcrIntervalMs(extreme, false);
+    }
+
+    public static long adOcrIntervalMs(boolean extreme, boolean riskMode) {
+        return riskMode ? 110L : extreme ? 170L : 850L;
     }
 
     public static long visualProbeIntervalMs(boolean extreme) {
-        return extreme ? 450L : 7_000L;
+        return visualProbeIntervalMs(extreme, false);
+    }
+
+    public static long visualProbeIntervalMs(boolean extreme, boolean riskMode) {
+        return riskMode ? 250L : extreme ? 450L : 7_000L;
     }
 
     public static long countdownRescanIntervalMs(boolean extreme) {
-        return extreme ? 90L : 700L;
+        return countdownRescanIntervalMs(extreme, false);
+    }
+
+    public static long countdownRescanIntervalMs(boolean extreme, boolean riskMode) {
+        return riskMode ? 60L : extreme ? 90L : 700L;
     }
 
     public static long confirmationDelayMs(boolean extreme) {
-        return extreme ? 60L : 260L;
+        return confirmationDelayMs(extreme, false);
+    }
+
+    public static long confirmationDelayMs(boolean extreme, boolean riskMode) {
+        return riskMode ? 40L : extreme ? 60L : 260L;
     }
 
     public static int maxCountdownRescans(boolean extreme) {
-        return extreme ? 96 : 48;
+        return maxCountdownRescans(extreme, false);
+    }
+
+    public static int maxCountdownRescans(boolean extreme, boolean riskMode) {
+        return riskMode ? 128 : extreme ? 96 : 48;
     }
 
     public static int minimumSkipScore(int configuredSensitivity, boolean extreme) {
-        return extreme ? 60 : AdConfidenceScorer.minimumScoreForSensitivity(configuredSensitivity);
+        return minimumSkipScore(configuredSensitivity, extreme, false);
+    }
+
+    public static int minimumSkipScore(int configuredSensitivity, boolean extreme, boolean riskMode) {
+        // 50 is the lowest scorer floor; all hard safety gates remain mandatory.
+        return riskMode ? 50 : extreme ? 60
+                : AdConfidenceScorer.minimumScoreForSensitivity(configuredSensitivity);
     }
 }

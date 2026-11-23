@@ -6,6 +6,7 @@ interface IAdSkipShellService {
     void shutdown();
     String listThirdPartyPackages();
     String getForegroundActivity();
+    String getForegroundPackage();
     String getPackageInfo(String packageName);
     String getAppOps(String packageName);
 }

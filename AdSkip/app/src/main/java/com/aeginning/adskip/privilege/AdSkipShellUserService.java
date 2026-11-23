@@ -59,6 +59,11 @@ public final class AdSkipShellUserService extends IAdSkipShellService.Stub {
         return result.output;
     }
 
+    @Override public String getForegroundPackage() {
+        String activity = getForegroundActivity();
+        return PrivilegeUtils.extractTopResumedPackage(activity);
+    }
+
     @Override public String getForegroundActivity() {
         CommandResult result = run(new String[]{"dumpsys", "activity", "activities"});
         if (result.exitCode != 0) return failure("读取前台 Activity", result);
