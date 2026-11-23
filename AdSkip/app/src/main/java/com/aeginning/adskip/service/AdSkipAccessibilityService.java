@@ -1249,6 +1249,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void dispatchPendingOcrRequest() {
         if (destroyed || database == null || ocrInFlight) return;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            PendingOcrRequest unsupported = pendingOcrRequests.poll();
+            if (unsupported != null) {
+                logDiagnostic(unsupported.expectedPackage, "OCR_UNAVAILABLE",
+                        "当前 Android 版本不支持截图 OCR；待处理请求已结束，保留控件树识别");
+            }
+            return;
+        }
         PendingOcrRequest pending = pendingOcrRequests.poll();
         if (pending == null) return;
         if (pending.generation != windowGeneration) {
@@ -1264,6 +1272,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         long waited = Math.max(0L, SystemClock.elapsedRealtime() - pending.queuedAt);
         logDiagnostic(pending.expectedPackage, "OCR_QUEUE_WAIT",
                 "最新 OCR 请求等待 " + waited + " ms 后开始；队列容量固定为 1");
+        // This request has already passed the trigger cadence before it was queued.
+        // Do not throttle it a second time merely because the previous OCR just ended.
+        lastOcrAt = 0L;
         maybeRunOcr(pending.expectedPackage, pending.adContext, pending.allowVisualProbe,
                 pending.generation, pending.treeContext, pending.splashProbe);
     }
@@ -1752,6 +1763,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private void runOcrConfirmationPass(Bitmap bitmap, String expectedLabel, Rect firstBounds,
                                         String expectedPackage, long generation, int firstScore,
                                         List<TextRecognizer> recognizers, int recognizerIndex) {
+        final long modelStartedAt = SystemClock.elapsedRealtime();
         if (destroyed || bitmap == null || bitmap.isRecycled()) {
             if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
             finishOcrWork();
@@ -1775,6 +1787,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         try {
             Task<Text> task = recognizer.process(InputImage.fromBitmap(bitmap, 0));
             task.addOnCompleteListener(completed -> {
+                logDiagnostic(expectedPackage, "OCR_CONFIRM_MODEL_DURATION",
+                        recognizerName(recognizer) + "二次确认模型耗时 "
+                                + Math.max(0L, SystemClock.elapsedRealtime() - modelStartedAt) + " ms");
                 boolean handedToFallback = false;
                 try {
                     if (destroyed) return;
