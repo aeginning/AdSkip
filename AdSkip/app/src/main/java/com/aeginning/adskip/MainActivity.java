@@ -692,7 +692,12 @@ public final class MainActivity extends Activity {
 
     private void showChangelogDialog() {
         String changelog =
-                "AdSkip " + getAppVersionName() + " · 极限识别与 UI 重构\n\n"
+                "AdSkip " + getAppVersionName() + " · Shizuku 前台探测与状态稳定性修复\n\n"
+                + "• 修复目标应用已在前台时后来加入白名单，Shizuku 不会立即触发快速识别的问题。\n"
+                + "• 无法解析 top-resumed 前台应用时自动降低轮询频率，避免不兼容 ROM 持续高频执行 dumpsys。\n"
+                + "• 多窗口场景优先读取 topResumedActivity，并对悬浮窗识别状态更新去重。\n"
+                + "• 原风险加速、Shizuku 身份校验、应用白名单、敏感区域保护和危险操作拦截均保留。\n\n"
+                + "AdSkip 1.4.0 · 极限识别与 UI 重构\n"
                 + "• 新增风险模式：更短扫描间隔、更快开屏探测及更高候选灵敏度；硬安全边界不能关闭。\n"
                 + "• Shizuku 已授权时自动监测 top-resumed 前台应用；检测到已启用应用并与实时无障碍窗口一致后，立即启动快速探测。\n"
                 + "• 悬浮窗可缩小至 104dp 宽、76dp 高、7sp 字号，并实时显示扫描、OCR、点击和关闭结果。\n"
