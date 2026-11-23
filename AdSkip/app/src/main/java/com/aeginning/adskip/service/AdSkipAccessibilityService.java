@@ -669,7 +669,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             pendingNodeConfirmation = null;
             pendingNodeSignature = null;
             if (destroyed || database == null || generation != windowGeneration
-                    || !database.isAppEnabled(packageName)) {
+                    || !isTargetPackageEligible(packageName)) {
                 logDiagnostic(packageName, "CONFIRM_ABORTED", "二次确认期间窗口或应用状态已变化");
                 return;
             }
@@ -819,7 +819,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         pendingCountdownRescan = () -> {
             pendingCountdownRescan = null;
             if (destroyed || database == null || generation != windowGeneration
-                    || !database.isAppEnabled(packageName)) {
+                    || !isTargetPackageEligible(packageName)) {
                 logDiagnostic(packageName, "COUNTDOWN_CANCELLED", "主动扫描期间应用或窗口状态发生变化");
                 return;
             }
@@ -927,7 +927,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             pendingSplashProbe = null;
             splashProbeAttempts++;
             if (destroyed || database == null || generation != windowGeneration
-                    || !database.isAppEnabled(packageName)) {
+                    || !isTargetPackageEligible(packageName)) {
                 cancelPendingSplashProbe();
                 return;
             }
@@ -2189,7 +2189,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return;
         }
         mainHandler.postDelayed(() -> {
-            if (destroyed || database == null) {
+            if (destroyed || database == null || !isTargetPackageEligible(expectedPackage)) {
                 finishOcrWork();
                 return;
             }
