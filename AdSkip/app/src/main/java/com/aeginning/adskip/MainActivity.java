@@ -36,6 +36,7 @@ import com.aeginning.adskip.service.DnsFilterVpnService;
 import com.aeginning.adskip.service.DnsFeedManager;
 import com.aeginning.adskip.engine.TextMatcher;
 import com.aeginning.adskip.engine.SkipWordLibrary;
+import com.aeginning.adskip.engine.AppScanPolicy;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -882,8 +883,13 @@ public final class MainActivity extends Activity {
     private void runForegroundDiagnostic() {
         runPrivilegeQuery("当前前台 Activity 诊断", service -> {
             String shell = service.getForegroundActivity();
+            String foregroundPackage = PrivilegeUtils.extractForegroundPackage(shell);
+            String shellResult = foregroundPackage.isEmpty() || isSystemOrUnknownPackage(foregroundPackage)
+                    ? "系统应用、桌面或无法验证的前台包已过滤；不会展示其 Activity 详情。"
+                    : shell;
             String local = getLastAccessibilityWindow();
-            return "【Shizuku / Shell dumpsys】\n" + shell + "\n\n【无障碍最近窗口事件】\n" + local;
+            return "【Shizuku / Shell dumpsys】\n" + shellResult
+                    + "\n\n【无障碍最近窗口事件】\n" + local;
         });
     }
 
@@ -893,6 +899,9 @@ public final class MainActivity extends Activity {
         String className = prefs.getString("foreground_last_class", "");
         long at = prefs.getLong("foreground_last_at", 0L);
         if (packageName.isEmpty() || at <= 0) return "暂无记录。请启用 AdSkip 无障碍服务后切换到目标应用。";
+        if (isSystemOrUnknownPackage(packageName)) {
+            return "最近窗口属于系统应用或无法验证的包，已按规则过滤。";
+        }
         long ageSeconds = Math.max(0L, (System.currentTimeMillis() - at) / 1000L);
         return "包名：" + packageName + "\nActivity：" + (className.isEmpty() ? "系统未提供" : className)
                 + "\n距上次窗口事件：" + ageSeconds + " 秒";
@@ -953,6 +962,17 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("关闭", null).show();
     }
 
+    private boolean isSystemOrUnknownPackage(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()) return true;
+        try {
+            android.content.pm.ApplicationInfo info =
+                    getPackageManager().getApplicationInfo(packageName, 0);
+            return info == null || AppScanPolicy.isSystemAppFlags(info.flags);
+        } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException failure) {
+            return true;
+        }
+    }
+
     private boolean isAccessibilityServiceEnabled() {
         try {
             int enabled = Settings.Secure.getInt(getContentResolver(),
@@ -986,7 +1006,9 @@ public final class MainActivity extends Activity {
         List<ResolveInfo> filtered = new ArrayList<>();
         Set<String> seenPackages = new HashSet<>();
         for (ResolveInfo info : activities) {
-            if (info.activityInfo == null || getPackageName().equals(info.activityInfo.packageName)) continue;
+            if (info.activityInfo == null || info.activityInfo.applicationInfo == null
+                    || getPackageName().equals(info.activityInfo.packageName)
+                    || AppScanPolicy.isSystemAppFlags(info.activityInfo.applicationInfo.flags)) continue;
             if (seenPackages.add(info.activityInfo.packageName)) filtered.add(info);
         }
 
