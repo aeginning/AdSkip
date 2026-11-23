@@ -1860,6 +1860,143 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
     }
 
+    private void refreshHomePackages() {
+        homePackages.clear();
+        try {
+            List<ResolveInfo> homes = new ArrayList<>();
+            getPackageManager().getHomeActivities(homes);
+            for (ResolveInfo resolveInfo : homes) {
+                if (resolveInfo != null && resolveInfo.activityInfo != null
+                        && resolveInfo.activityInfo.packageName != null) {
+                    homePackages.add(resolveInfo.activityInfo.packageName);
+                }
+            }
+        } catch (RuntimeException failure) {
+            logDiagnostic("", "HOME_PACKAGE_DISCOVERY_FAILED",
+                    "无法读取桌面应用包名；用户启动专用模式将按严格匹配失败关闭处理");
+        }
+    }
+
+    private boolean isHomePackage(String packageName) {
+        return packageName != null && !packageName.isEmpty()
+                && homePackages.contains(packageName);
+    }
+
+    /**
+     * Package visibility failures are treated as unknown and excluded. Flags are cached
+     * because PackageManager lookups cross Binder and accessibility events can be frequent.
+     */
+    private int getPackageFlags(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()) return -1;
+        synchronized (packageFlagsCache) {
+            Integer cached = packageFlagsCache.get(packageName);
+            if (cached != null) return cached;
+            int flags;
+            try {
+                ApplicationInfo info = getPackageManager().getApplicationInfo(packageName, 0);
+                flags = info == null ? -1 : info.flags;
+                if (info != null) {
+                    CharSequence label = getPackageManager().getApplicationLabel(info);
+                    if (label != null) packageLabelCache.put(packageName, label.toString());
+                }
+            } catch (PackageManager.NameNotFoundException | RuntimeException failure) {
+                flags = -1;
+            }
+            packageFlagsCache.put(packageName, flags);
+            while (packageFlagsCache.size() > 96) {
+                String oldest = packageFlagsCache.keySet().iterator().next();
+                packageFlagsCache.remove(oldest);
+                packageLabelCache.remove(oldest);
+            }
+            return flags;
+        }
+    }
+
+    private boolean isSystemPackage(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()
+                || packageName.equals(getPackageName())) return true;
+        int flags = getPackageFlags(packageName);
+        return flags < 0 || AppScanPolicy.isSystemAppFlags(flags);
+    }
+
+    private String getApplicationLabelForPackage(String packageName) {
+        getPackageFlags(packageName);
+        synchronized (packageFlagsCache) {
+            String cached = packageLabelCache.get(packageName);
+            return cached == null ? "" : cached;
+        }
+    }
+
+    private boolean isUserLaunchOnlyModeEnabled() {
+        return getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("user_launch_only_mode_enabled", false);
+    }
+
+    private boolean isTargetPackageEligible(String packageName) {
+        if (destroyed || database == null || packageName == null || packageName.trim().isEmpty()
+                || packageName.equals(getPackageName()) || isHomePackage(packageName)) return false;
+        int flags = getPackageFlags(packageName);
+        if (flags < 0) {
+            logDiagnostic(packageName, "APP_METADATA_UNAVAILABLE",
+                    "无法读取目标应用包元数据；为确保系统应用过滤有效，本次按未知包排除");
+            return false;
+        }
+        if (AppScanPolicy.isSystemAppFlags(flags)) {
+            logDiagnostic(packageName, "SYSTEM_APP_EXCLUDED",
+                    "系统应用或已更新系统应用被全局排除，不参与无障碍、OCR、Shizuku 前台探测及定时扫描");
+            return false;
+        }
+        if (!database.isAppEnabled(packageName)) return false;
+        boolean userMode = isUserLaunchOnlyModeEnabled();
+        boolean userLaunched = userLaunchTracker.isUserLaunched(packageName);
+        if (userMode && !userLaunched) {
+            logDiagnostic(packageName, "USER_LAUNCH_REQUIRED",
+                    "用户启动专用模式已开启；目标应用没有匹配到桌面/应用抽屉点击记录");
+            return false;
+        }
+        return AppScanPolicy.shouldScan(flags, true, true, userMode, userLaunched);
+    }
+
+    private String readLauncherClickLabel(AccessibilityNodeInfo source) {
+        AccessibilityNodeInfo current = source;
+        for (int depth = 0; current != null && depth < 3; depth++) {
+            String label = "";
+            if (current.isVisibleToUser() && !current.isPassword() && !current.isEditable()) {
+                CharSequence description = current.getContentDescription();
+                CharSequence text = current.getText();
+                if (description != null && description.length() > 0) {
+                    label = description.toString().trim();
+                }
+                if (label.isEmpty() && text != null && text.length() > 0) {
+                    label = text.toString().trim();
+                }
+            }
+            AccessibilityNodeInfo parent = current.getParent();
+            recycleNode(current);
+            if (!label.isEmpty()) {
+                recycleNode(parent);
+                return label.length() > 120 ? label.substring(0, 120) : label;
+            }
+            current = parent;
+        }
+        recycleNode(current);
+        return "";
+    }
+
+    private void onUserLaunchModeChanged() {
+        if (destroyed) return;
+        windowGeneration++;
+        pendingOcrRequests.clear();
+        cancelPendingNodeConfirmation();
+        cancelPendingCountdownRescan();
+        cancelPendingSplashProbe();
+        userLaunchTracker.clear();
+        logDiagnostic("", "USER_LAUNCH_MODE_CHANGED",
+                isUserLaunchOnlyModeEnabled()
+                        ? "用户启动专用模式已开启；需要从桌面/应用抽屉重新点击目标应用图标"
+                        : "用户启动专用模式已关闭；恢复对已启用且当前前台的第三方应用扫描");
+    }
+
     private boolean isOcrEnabled() {
         return getSharedPreferences("adskip_settings", MODE_PRIVATE).getBoolean("ocr_enabled", true);
     }
