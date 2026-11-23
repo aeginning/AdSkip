@@ -1051,6 +1051,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             return;
         }
         if (!status.canUseEnhancedDiagnostics()) {
+            // The cached foreground identity is no longer backed by a live Shizuku
+            // observation. Clear it so the first valid observation after reconnect is fresh.
+            lastPrivilegedForegroundPackage = "";
+            lastPrivilegedForegroundWasEnabled = false;
             // Do not open a permission prompt automatically; ordinary accessibility mode continues.
             scheduleForegroundProbe(PrivilegeProbePolicy.retryWhenUnavailableMs());
             return;
@@ -1072,6 +1076,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     foregroundProbeInFlight = false;
                     if (destroyed) return;
                     if (!resultFailure.isEmpty()) {
+                        lastPrivilegedForegroundPackage = "";
+                        lastPrivilegedForegroundWasEnabled = false;
                         logDiagnostic("", "PRIVILEGED_PROBE_ERROR",
                                 "Shizuku 前台窗口读取失败：" + resultFailure + "；继续使用无障碍事件");
                     } else if (!resultPackage.isEmpty()) {
