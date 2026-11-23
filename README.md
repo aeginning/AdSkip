@@ -1,4 +1,4 @@
-# AdSkip 1.4.3 — verified interception notifications
+# AdSkip 1.4.4 — prioritized OCR region with full-screen fallback
 
 Android intelligent ad-skip assistant.
 
@@ -10,7 +10,7 @@ To download the current source, use **Code → Download ZIP** on this repository
 
 ## Build in GitHub Actions
 
-The **Android CI** workflow runs JVM unit tests, Android Lint, and `:app:assembleDebug` with JDK 17, Gradle 8.11.1, and Android SDK 36. Download the `AdSkip-1.4.3-debug-apk` artifact from a successful workflow run; test and lint reports are uploaded separately.
+The **Android CI** workflow runs JVM unit tests, Android Lint, and `:app:assembleDebug` with JDK 17, Gradle 8.11.1, and Android SDK 36. Download the `AdSkip-1.4.4-debug-apk` artifact from a successful workflow run; test and lint reports are uploaded separately.
 
 ## Local build
 
