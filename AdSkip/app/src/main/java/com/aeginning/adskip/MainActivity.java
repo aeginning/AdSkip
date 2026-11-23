@@ -54,6 +54,8 @@ import com.aeginning.adskip.privilege.IAdSkipShellService;
 public final class MainActivity extends Activity {
     private static final int REQUEST_VPN = 410;
     private static final int REQUEST_NOTIFICATIONS = 411;
+    private static final int REQUEST_SUCCESS_NOTIFICATION_PERMISSION = 412;
+    private CompoundButton successNotificationSwitch;
     private RuleDatabase database;
     private TextView serviceStatus;
     private TextView appRuleStatus;
@@ -79,6 +81,28 @@ public final class MainActivity extends Activity {
         privilegeManager.addListener(privilegeListener);
         privilegeManager.acquire();
         buildUi();
+        requestSuccessNotificationPermissionIfNeeded();
+    }
+
+    private void requestSuccessNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < 33
+                || !getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("interception_success_notifications_enabled", true)
+                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        android.content.SharedPreferences prefs =
+                getSharedPreferences("adskip_settings", MODE_PRIVATE);
+        if (prefs.getBoolean("success_notification_permission_prompted", false)) return;
+        prefs.edit().putBoolean("success_notification_permission_prompted", true).apply();
+        mainHandler.postDelayed(() -> {
+            if (!isFinishing() && successNotificationSwitch != null
+                    && successNotificationSwitch.isChecked()
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        REQUEST_SUCCESS_NOTIFICATION_PERMISSION);
+            }
+        }, 650L);
     }
 
     @android.annotation.SuppressLint("UseSwitchCompatOrMaterialCode")
@@ -175,6 +199,30 @@ public final class MainActivity extends Activity {
         TextView statusHint = label("无障碍负责识别明确的跳过按钮；DNS 过滤需要单独启动并获得 VPN 授权。", 12, 0xFF7A8495, false);
         addGap(statusCard, 9);
         statusCard.addView(statusHint);
+
+        addGap(statusCard, 8);
+        successNotificationSwitch = new android.widget.Switch(this);
+        successNotificationSwitch.setText("拦截成功后发送通知");
+        successNotificationSwitch.setTextSize(14);
+        successNotificationSwitch.setTextColor(0xFF344054);
+        successNotificationSwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("interception_success_notifications_enabled", true));
+        successNotificationSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
+            getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                    .putBoolean("interception_success_notifications_enabled", checked).apply();
+            if (checked && Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        REQUEST_SUCCESS_NOTIFICATION_PERMISSION);
+            }
+        });
+        statusCard.addView(successNotificationSwitch);
+        TextView notificationHint = label(
+                "广告跳过经原应用窗口验证成功、或 DNS 拦截响应成功后提醒。两类通知各自更新，不会因高频 DNS 请求堆满通知栏；Android 13 及以上需要允许通知权限。",
+                11, 0xFF7A8495, false);
+        addGap(statusCard, 3);
+        statusCard.addView(notificationHint);
 
         addGap(root, 14);
 
@@ -692,7 +740,11 @@ public final class MainActivity extends Activity {
 
     private void showChangelogDialog() {
         String changelog =
-                "AdSkip " + getAppVersionName() + " · 极限识别热路径优化\n\n"
+                "AdSkip " + getAppVersionName() + " · 拦截成功通知与 DNS 响应确认\n\n"
+                + "• 新增广告跳过成功通知：只有点击后在原应用窗口验证确认广告候选消失或页面发生变化才通知；仅派发点击请求、验证未知或点击无效均不通知。\n"
+                + "• 新增 DNS 拦截成功通知：只有 NXDOMAIN 拦截响应成功写入本地 VPN 通道后才通知。\n"
+                + "• 通知总开关默认开启；Android 13 及以上首次使用时请求通知权限。广告跳过与 DNS 两类通知分别更新并显示累计次数，避免高频 DNS 请求堆满通知栏。\n"
+                + "• 通知权限被拒绝或用户关闭总开关时，不影响广告识别与 DNS 拦截。\n\n"
                 + "• 风险模式继续提速：事件扫描约 30ms、广告 OCR 触发约 85ms、倒计时重扫约 40ms、二次确认约 30ms、开屏探测首轮约 40ms；Shizuku 前台探测约 200ms。所有循环均有次数上限。\n"
                 + "• 优化控件树候选排序：每个子节点只计算一次优先级，叶子节点不再创建空列表，减少 Accessibility 跨进程读取与短命对象。\n"
                 + "• 文字匹配预编译倒计时、广告上下文、零宽字符和空白正则；候选评分复用已归一化的文字与页面上下文。\n"
@@ -1303,6 +1355,20 @@ public final class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_SUCCESS_NOTIFICATION_PERMISSION) {
+            boolean granted = grantResults.length > 0
+                    && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            if (!granted) {
+                getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                        .putBoolean("interception_success_notifications_enabled", false).apply();
+                if (successNotificationSwitch != null) successNotificationSwitch.setChecked(false);
+                Toast.makeText(this, "未授予通知权限，拦截通知已关闭；广告识别和 DNS 拦截不受影响。",
+                        Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "拦截成功通知已启用。", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
         if (requestCode != REQUEST_NOTIFICATIONS) return;
         if (grantResults.length == 0 || grantResults[0] != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "通知权限未授予；VPN 前台服务仍会由系统显示运行状态。", Toast.LENGTH_LONG).show();

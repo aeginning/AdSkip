@@ -172,7 +172,8 @@ public final class DnsFilterVpnService extends VpnService {
             if (query == null) return;
 
             byte[] dnsResponse;
-            if (database.isDomainBlocked(query.domain)) {
+            boolean blockedDomain = database.isDomainBlocked(query.domain);
+            if (blockedDomain) {
                 dnsResponse = DnsPacketCodec.blockedNxDomain(query.dnsPayload);
                 if (shouldLogDomainEvent(query.domain, SystemClock.elapsedRealtime())) {
                     database.log("DNS", query.domain, "BLOCK", "Matched local manual/subscription domain rule");
@@ -195,7 +196,9 @@ public final class DnsFilterVpnService extends VpnService {
             }
 
             byte[] responsePacket = DnsPacketCodec.buildResponse(query, dnsResponse);
-            if (responsePacket != null) writeTunResponse(output, responsePacket);
+            if (responsePacket != null && writeTunResponse(output, responsePacket) && blockedDomain) {
+                SuccessNotificationManager.notifyDnsBlocked(this, query.domain);
+            }
         } catch (Exception failure) {
             // Keep one malformed/failed request from terminating the VPN worker, but leave
             // a throttled, non-sensitive diagnostic so repeated processing faults are visible.
@@ -224,14 +227,16 @@ public final class DnsFilterVpnService extends VpnService {
         }
     }
 
-    private void writeTunResponse(FileOutputStream output, byte[] responsePacket) {
-        if (!running || output == null || responsePacket == null) return;
+    private boolean writeTunResponse(FileOutputStream output, byte[] responsePacket) {
+        if (!running || output == null || responsePacket == null) return false;
         synchronized (tunWriteLock) {
-            if (!running) return;
+            if (!running) return false;
             try {
                 output.write(responsePacket);
+                return true;
             } catch (java.io.IOException ignored) {
                 // Reader loop owns the descriptor and will report tunnel failure.
+                return false;
             }
         }
     }
