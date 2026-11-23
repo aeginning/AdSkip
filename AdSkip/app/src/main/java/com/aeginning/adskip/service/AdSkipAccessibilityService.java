@@ -12,6 +12,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.content.SharedPreferences;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -28,6 +32,8 @@ import com.aeginning.adskip.engine.SplashProbePolicy;
 import com.aeginning.adskip.engine.ExtremeSkipPolicy;
 import com.aeginning.adskip.engine.SkipWordLibrary;
 import com.aeginning.adskip.engine.OcrRegionPolicy;
+import com.aeginning.adskip.engine.AppScanPolicy;
+import com.aeginning.adskip.engine.UserLaunchTracker;
 import com.aeginning.adskip.engine.SkipLayoutPolicy;
 import com.aeginning.adskip.engine.PrivilegeProbePolicy;
 import com.aeginning.adskip.engine.RecognitionStatusPolicy;
@@ -48,6 +54,8 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -70,6 +78,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private final ExecutorService foregroundProbeExecutor = Executors.newSingleThreadExecutor();
     private final Object ocrStateLock = new Object();
     private final LatestWinsQueue<PendingOcrRequest> pendingOcrRequests = new LatestWinsQueue<>();
+    private final UserLaunchTracker userLaunchTracker = new UserLaunchTracker();
+    private final Set<String> homePackages = new HashSet<>();
+    private final Map<String, Integer> packageFlagsCache = new LinkedHashMap<>();
+    private final Map<String, String> packageLabelCache = new LinkedHashMap<>();
     private RuleDatabase database;
     private FloatingStatusOverlay floatingStatusOverlay;
     private PrivilegeManager privilegeManager;
@@ -123,8 +135,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         destroyed = false;
         database = new RuleDatabase(this);
         floatingStatusOverlay = new FloatingStatusOverlay(this);
+        refreshHomePackages();
         overlayPreferences = getSharedPreferences("adskip_settings", MODE_PRIVATE);
         overlayPreferenceListener = (preferences, key) -> {
+            if ("user_launch_only_mode_enabled".equals(key)) {
+                mainHandler.post(this::onUserLaunchModeChanged);
+            }
             if (key != null && (key.startsWith("floating_overlay_")
                     || "dns_active".equals(key) || "ocr_enabled".equals(key)
                     || "extreme_skip_mode".equals(key) || "risk_mode_enabled".equals(key))
@@ -154,12 +170,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (destroyed || event == null || database == null) return;
-        refreshFloatingOverlay(false);
         int type = event.getEventType();
-        if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-                && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
-                && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return;
+        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            if (!isUserLaunchOnlyModeEnabled()) return;
+        } else {
+            if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                    && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                    && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
+                    && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return;
+            refreshFloatingOverlay(false);
+        }
 
         String previousSplashProbePackage = splashProbePackage;
         int previousSplashProbeAttempts = splashProbeAttempts;
@@ -192,9 +212,34 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     "事件未提供包名，已从当前活动无障碍窗口安全恢复目标；仍需通过应用启用状态和窗口一致性检查");
         }
 
+        // Launcher clicks are used only as a user-intent signal. The launcher UI itself
+        // is never scanned for ad controls.
+        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            if (isUserLaunchOnlyModeEnabled() && isHomePackage(pkg)) {
+                String clickedLabel = readLauncherClickLabel(event.getSource());
+                String clickedPackage = resolveEnabledPackageForLauncherLabel(clickedLabel);
+                if (!clickedPackage.isEmpty()) {
+                    userLaunchTracker.recordLauncherClick(clickedPackage, SystemClock.elapsedRealtime());
+                    logDiagnostic(clickedPackage, "USER_LAUNCH_INTENT_RECORDED",
+                            "桌面/应用抽屉图标标签唯一匹配到已启用应用包名；等待该包进入前台");
+                } else if (!clickedLabel.isEmpty()) {
+                    logDiagnostic(pkg, "USER_LAUNCH_INTENT_REJECTED",
+                            "图标标签无法唯一匹配到已启用的非系统应用；为避免同名应用误放行，不建立扫描许可");
+                }
+            }
+            recycleNode(fallbackRoot);
+            return;
+        }
+
         boolean windowIdentityEvent = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED;
         if (windowIdentityEvent) {
+            if (isUserLaunchOnlyModeEnabled()) {
+                // Revoke the prior app's authorization as soon as any other package
+                // becomes the foreground window; a later notification/deep-link return
+                // cannot reuse an old launcher authorization.
+                userLaunchTracker.onForegroundChanged(pkg);
+            }
             int eventWindowId = event.getWindowId();
             CharSequence classNameValue = event.getClassName();
             String eventClass = classNameValue == null ? "" : classNameValue.toString().trim();
@@ -216,6 +261,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             if (sessionChanged) {
                 logDiagnostic(pkg, "WINDOW_SESSION_CHANGED",
                         "检测到应用包名、窗口 ID 或 Activity 类变化；已使旧窗口候选失效");
+            }
+        }
+
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                && isUserLaunchOnlyModeEnabled()
+                && !pkg.equals(getPackageName())
+                && !isHomePackage(pkg) && !isSystemPackage(pkg)) {
+            if (userLaunchTracker.onForegroundPackage(pkg, SystemClock.elapsedRealtime())) {
+                logDiagnostic(pkg, "USER_LAUNCH_ACCEPTED",
+                        "前台包名与最近一次唯一匹配的桌面图标启动意图一致；当前前台会话获准扫描");
             }
         }
 
@@ -248,6 +303,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             recycleNode(fallbackRoot);
             return;
         }
+        if (isHomePackage(pkg) || isSystemPackage(pkg)) {
+            logDiagnostic(pkg, "SYSTEM_APP_EXCLUDED",
+                    "桌面/系统应用已排除；不会扫描其控件树、OCR 或安排前台重扫");
+            recycleNode(fallbackRoot);
+            return;
+        }
         if (!database.isAppEnabled(pkg)) {
             recycleNode(fallbackRoot);
             if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
@@ -255,6 +316,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 logDiagnostic("", "APP_NOT_ENABLED",
                         "当前前台应用尚未在应用自动化中启用；请在应用自动化中勾选并保存后重试。为保护隐私不扫描页面");
             }
+            return;
+        }
+        if (isUserLaunchOnlyModeEnabled() && !userLaunchTracker.isUserLaunched(pkg)) {
+            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                    || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+                logDiagnostic(pkg, "USER_LAUNCH_REQUIRED",
+                        "用户启动专用模式已开启；当前应用没有匹配到桌面/应用抽屉图标点击记录，跳过扫描");
+            }
+            recycleNode(fallbackRoot);
             return;
         }
 
@@ -611,7 +681,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             pendingNodeConfirmation = null;
             pendingNodeSignature = null;
             if (destroyed || database == null || generation != windowGeneration
-                    || !database.isAppEnabled(packageName)) {
+                    || !isTargetPackageEligible(packageName)) {
                 logDiagnostic(packageName, "CONFIRM_ABORTED", "二次确认期间窗口或应用状态已变化");
                 return;
             }
@@ -740,7 +810,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
      */
     private void scheduleCountdownRescan(String packageName, long generation) {
         if (destroyed || database == null || packageName == null
-                || generation != windowGeneration || !database.isAppEnabled(packageName)) return;
+                || generation != windowGeneration || !isTargetPackageEligible(packageName)) return;
         cancelPendingSplashProbe();
         if (!packageName.equals(countdownRescanPackage)) {
             cancelPendingCountdownRescan();
@@ -761,7 +831,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         pendingCountdownRescan = () -> {
             pendingCountdownRescan = null;
             if (destroyed || database == null || generation != windowGeneration
-                    || !database.isAppEnabled(packageName)) {
+                    || !isTargetPackageEligible(packageName)) {
                 logDiagnostic(packageName, "COUNTDOWN_CANCELLED", "主动扫描期间应用或窗口状态发生变化");
                 return;
             }
@@ -849,7 +919,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     private void scheduleSplashProbe(String packageName, long generation) {
         if (destroyed || database == null
                 || packageName == null || packageName.trim().isEmpty()
-                || generation != windowGeneration || !database.isAppEnabled(packageName)
+                || generation != windowGeneration || !isTargetPackageEligible(packageName)
                 || !isOcrEnabled()) return;
         if (!packageName.equals(splashProbePackage)) {
             cancelPendingSplashProbe();
@@ -869,7 +939,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             pendingSplashProbe = null;
             splashProbeAttempts++;
             if (destroyed || database == null || generation != windowGeneration
-                    || !database.isAppEnabled(packageName)) {
+                    || !isTargetPackageEligible(packageName)) {
                 cancelPendingSplashProbe();
                 return;
             }
@@ -1119,6 +1189,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void handlePrivilegedForegroundPackage(String packageName) {
         if (packageName == null || packageName.trim().isEmpty()) return;
+        if (!isTargetPackageEligible(packageName)) {
+            lastPrivilegedForegroundPackage = packageName;
+            lastPrivilegedForegroundWasEnabled = false;
+            return;
+        }
         boolean appEnabled = database != null && database.isAppEnabled(packageName);
         if (!PrivilegeProbePolicy.shouldProbeForeground(
                 lastPrivilegedForegroundPackage, lastPrivilegedForegroundWasEnabled,
@@ -1184,8 +1259,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void executeNodeCandidate(Candidate candidate, String packageName, String context,
                                        long generation) {
-        if (destroyed || generation != windowGeneration || database == null
-                || !database.isAppEnabled(packageName)) {
+        if (destroyed || generation != windowGeneration || !isTargetPackageEligible(packageName)) {
             logDiagnostic(packageName, "CLICK_REVALIDATION_FAILED",
                     "点击前应用开关或窗口代次已变化；候选已作废");
             return;
@@ -1245,7 +1319,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         final Rect expectedBounds = new Rect(clickedBounds);
         final String expectedLabel = label == null ? "" : label;
         mainHandler.postDelayed(() -> {
-            if (destroyed || database == null) return;
+            if (destroyed || database == null || !isTargetPackageEligible(packageName)) return;
             AccessibilityNodeInfo root = getRootInActiveWindow();
             if (root == null) {
                 logDiagnostic(packageName, "CLICK_VERIFY_UNKNOWN",
@@ -1322,7 +1396,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void maybeRunOcr(String expectedPackage, boolean adContext, boolean allowVisualProbe,
                              long generation, String treeContext, boolean splashProbe) {
-        if (destroyed || expectedPackage == null || expectedPackage.trim().isEmpty()) return;
+        if (destroyed || expectedPackage == null || expectedPackage.trim().isEmpty()
+                || !isTargetPackageEligible(expectedPackage)) return;
         if (hasSensitiveInputInCurrentWindow) {
             logDiagnostic(expectedPackage, "OCR_BLOCKED_SENSITIVE",
                     "当前窗口存在敏感输入区域，已禁止截图 OCR");
@@ -1344,6 +1419,14 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 : ExtremeSkipPolicy.visualProbeIntervalMs(extreme, isRiskModeEnabled());
         if (now - lastOcrAt < interval) {
             logDiagnostic(expectedPackage, "OCR_THROTTLED", "OCR 截图间隔未达到限制，已节流");
+            return;
+        }
+        // A pending/latest-wins request may resume after a foreground transition without
+        // a reliable window-state event on some OEM builds. Verify the actual active window
+        // package before taking another screenshot, not only before clicking the candidate.
+        if (!isActiveWindowSafeForTarget(expectedPackage, generation)) {
+            logDiagnostic(expectedPackage, "OCR_FOREGROUND_REVALIDATION_FAILED",
+                    "截图前实时活动窗口包名、应用扫描许可或敏感输入复核未通过");
             return;
         }
         if (!tryBeginOcrWork(expectedPackage)) {
@@ -1471,9 +1554,9 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     "待处理 OCR 请求所属窗口会话已变化；已丢弃，不会使用旧截图或旧候选");
             return;
         }
-        if (!database.isAppEnabled(pending.expectedPackage)) {
+        if (!isTargetPackageEligible(pending.expectedPackage)) {
             logDiagnostic(pending.expectedPackage, "OCR_QUEUE_APP_DISABLED",
-                    "待处理 OCR 请求执行前发现目标应用已关闭自动化；已丢弃");
+                    "待处理 OCR 请求执行前发现目标应用已不在扫描许可范围；已丢弃");
             return;
         }
         long waited = Math.max(0L, SystemClock.elapsedRealtime() - pending.queuedAt);
@@ -1802,6 +1885,175 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         }
     }
 
+    private void refreshHomePackages() {
+        homePackages.clear();
+        try {
+            Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+            homeIntent.addCategory(Intent.CATEGORY_HOME);
+            List<ResolveInfo> homes = getPackageManager().queryIntentActivities(homeIntent, 0);
+            for (ResolveInfo resolveInfo : homes) {
+                if (resolveInfo != null && resolveInfo.activityInfo != null
+                        && resolveInfo.activityInfo.packageName != null) {
+                    homePackages.add(resolveInfo.activityInfo.packageName);
+                }
+            }
+        } catch (RuntimeException ignored) {
+            // If the launcher cannot be identified, user-launch mode stays fail-closed.
+        }
+        if (homePackages.isEmpty()) {
+            logDiagnostic("", "HOME_PACKAGE_DISCOVERY_FAILED",
+                    "无法读取桌面应用包名；用户启动专用模式将按严格匹配失败关闭处理");
+        }
+    }
+
+    private boolean isHomePackage(String packageName) {
+        return packageName != null && !packageName.isEmpty()
+                && homePackages.contains(packageName);
+    }
+
+    /**
+     * Package visibility failures are treated as unknown and excluded. Flags are cached
+     * because PackageManager lookups cross Binder and accessibility events can be frequent.
+     */
+    private int getPackageFlags(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()) return -1;
+        synchronized (packageFlagsCache) {
+            Integer cached = packageFlagsCache.get(packageName);
+            if (cached != null) return cached;
+            int flags;
+            try {
+                ApplicationInfo info = getPackageManager().getApplicationInfo(packageName, 0);
+                flags = info == null ? -1 : info.flags;
+                if (info != null) {
+                    CharSequence label = getPackageManager().getApplicationLabel(info);
+                    if (label != null) packageLabelCache.put(packageName, label.toString());
+                }
+            } catch (PackageManager.NameNotFoundException | RuntimeException failure) {
+                flags = -1;
+            }
+            packageFlagsCache.put(packageName, flags);
+            while (packageFlagsCache.size() > 96) {
+                String oldest = packageFlagsCache.keySet().iterator().next();
+                packageFlagsCache.remove(oldest);
+                packageLabelCache.remove(oldest);
+            }
+            return flags;
+        }
+    }
+
+    private boolean isSystemPackage(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()
+                || packageName.equals(getPackageName())) return true;
+        int flags = getPackageFlags(packageName);
+        return flags < 0 || AppScanPolicy.isSystemAppFlags(flags);
+    }
+
+    private String getApplicationLabelForPackage(String packageName) {
+        getPackageFlags(packageName);
+        synchronized (packageFlagsCache) {
+            String cached = packageLabelCache.get(packageName);
+            return cached == null ? "" : cached;
+        }
+    }
+
+    private boolean isUserLaunchOnlyModeEnabled() {
+        return getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("user_launch_only_mode_enabled", false);
+    }
+
+    private boolean isTargetPackageEligible(String packageName) {
+        if (destroyed || database == null || packageName == null || packageName.trim().isEmpty()
+                || packageName.equals(getPackageName()) || isHomePackage(packageName)) return false;
+        int flags = getPackageFlags(packageName);
+        if (flags < 0) {
+            logDiagnostic(packageName, "APP_METADATA_UNAVAILABLE",
+                    "无法读取目标应用包元数据；为确保系统应用过滤有效，本次按未知包排除");
+            return false;
+        }
+        if (AppScanPolicy.isSystemAppFlags(flags)) {
+            logDiagnostic(packageName, "SYSTEM_APP_EXCLUDED",
+                    "系统应用或已更新系统应用被全局排除，不参与无障碍、OCR、Shizuku 前台探测及定时扫描");
+            return false;
+        }
+        if (!database.isAppEnabled(packageName)) return false;
+        boolean userMode = isUserLaunchOnlyModeEnabled();
+        boolean userLaunched = userLaunchTracker.isUserLaunched(packageName);
+        if (userMode && !userLaunched) {
+            logDiagnostic(packageName, "USER_LAUNCH_REQUIRED",
+                    "用户启动专用模式已开启；目标应用没有匹配到桌面/应用抽屉点击记录");
+            return false;
+        }
+        return AppScanPolicy.shouldScan(flags, true, true, userMode, userLaunched);
+    }
+
+    private String resolveEnabledPackageForLauncherLabel(String launcherLabel) {
+        String normalizedLauncherLabel = UserLaunchTracker.normalizeLauncherLabel(launcherLabel);
+        if (normalizedLauncherLabel.isEmpty() || database == null) return "";
+
+        String matchedPackage = "";
+        for (String packageName : database.getEnabledApps()) {
+            if (packageName == null || packageName.trim().isEmpty()
+                    || packageName.equals(getPackageName()) || isHomePackage(packageName)
+                    || isSystemPackage(packageName)) continue;
+            String installedLabel = getApplicationLabelForPackage(packageName);
+            if (!normalizedLauncherLabel.equals(
+                    UserLaunchTracker.normalizeLauncherLabel(installedLabel))) continue;
+
+            // Duplicate labels are ambiguous: never guess which package the user tapped.
+            if (!matchedPackage.isEmpty() && !matchedPackage.equals(packageName)) {
+                logDiagnostic("", "USER_LAUNCH_LABEL_AMBIGUOUS",
+                        "多个已启用应用拥有相同显示名称；该图标点击不建立用户启动许可");
+                return "";
+            }
+            matchedPackage = packageName;
+        }
+        if (matchedPackage.isEmpty()) {
+            logDiagnostic("", "USER_LAUNCH_LABEL_UNRESOLVED",
+                    "桌面图标名称未匹配任何已启用的非系统应用；不会建立扫描许可");
+        }
+        return matchedPackage;
+    }
+
+    private String readLauncherClickLabel(AccessibilityNodeInfo source) {
+        AccessibilityNodeInfo current = source;
+        for (int depth = 0; current != null && depth < 3; depth++) {
+            String label = "";
+            if (current.isVisibleToUser() && !current.isPassword() && !current.isEditable()) {
+                CharSequence description = current.getContentDescription();
+                CharSequence text = current.getText();
+                if (description != null && description.length() > 0) {
+                    label = description.toString().trim();
+                }
+                if (label.isEmpty() && text != null && text.length() > 0) {
+                    label = text.toString().trim();
+                }
+            }
+            AccessibilityNodeInfo parent = current.getParent();
+            recycleNode(current);
+            if (!label.isEmpty()) {
+                recycleNode(parent);
+                return label.length() > 120 ? label.substring(0, 120) : label;
+            }
+            current = parent;
+        }
+        recycleNode(current);
+        return "";
+    }
+
+    private void onUserLaunchModeChanged() {
+        if (destroyed) return;
+        windowGeneration++;
+        pendingOcrRequests.clear();
+        cancelPendingNodeConfirmation();
+        cancelPendingCountdownRescan();
+        cancelPendingSplashProbe();
+        userLaunchTracker.clear();
+        logDiagnostic("", "USER_LAUNCH_MODE_CHANGED",
+                isUserLaunchOnlyModeEnabled()
+                        ? "用户启动专用模式已开启；需要从桌面/应用抽屉重新点击目标应用图标"
+                        : "用户启动专用模式已关闭；恢复对已启用且当前前台的第三方应用扫描");
+    }
+
     private boolean isOcrEnabled() {
         return getSharedPreferences("adskip_settings", MODE_PRIVATE).getBoolean("ocr_enabled", true);
     }
@@ -1873,6 +2125,11 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void executeOcrCandidate(OcrCandidate candidate, String context, int bitmapWidth, int bitmapHeight,
                                      String expectedPackage, long generation) {
+        if (!isTargetPackageEligible(expectedPackage)) {
+            logDiagnostic(expectedPackage, "OCR_PACKAGE_EXCLUDED",
+                    "目标包不属于已启用的用户应用扫描范围；OCR 候选已作废");
+            return;
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             logDiagnostic(expectedPackage, "OCR_UNAVAILABLE", "Android 11 以下不支持当前截图 OCR 路径");
             return;
@@ -1978,12 +2235,13 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private void confirmOcrCandidate(String expectedLabel, Rect firstBounds,
                                      String expectedPackage, long generation, int firstScore) {
+        if (!isTargetPackageEligible(expectedPackage)) return;
         if (!tryBeginOcrWork(expectedPackage)) {
             logDiagnostic(expectedPackage, "OCR_CONFIRM_BUSY", "另一轮 OCR 正在执行；本次二次确认已安全取消，避免并发截图");
             return;
         }
         mainHandler.postDelayed(() -> {
-            if (destroyed || database == null) {
+            if (destroyed || database == null || !isTargetPackageEligible(expectedPackage)) {
                 finishOcrWork();
                 return;
             }
@@ -2247,6 +2505,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private boolean isNodeTargetSafe(String expectedPackage, long generation, Rect targetBounds) {
+        if (!isTargetPackageEligible(expectedPackage)) {
+            logDiagnostic(expectedPackage, "CLICK_PACKAGE_EXCLUDED", "目标应用不再满足前台扫描许可条件");
+            return false;
+        }
         if (destroyed || generation != windowGeneration || targetBounds == null) {
             logDiagnostic(expectedPackage, "WINDOW_STALE", "节点候选复核时窗口代次已失效或目标区域为空");
             return false;
@@ -2325,6 +2587,10 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
     }
 
     private boolean isActiveWindowSafeForTarget(String expectedPackage, long generation) {
+        if (!isTargetPackageEligible(expectedPackage)) {
+            logDiagnostic(expectedPackage, "WINDOW_PACKAGE_EXCLUDED", "目标应用不再属于当前允许扫描范围");
+            return false;
+        }
         if (destroyed || generation != windowGeneration) {
             logDiagnostic(expectedPackage, "WINDOW_STALE", "待执行动作对应的窗口代次已失效");
             return false;

@@ -36,6 +36,7 @@ import com.aeginning.adskip.service.DnsFilterVpnService;
 import com.aeginning.adskip.service.DnsFeedManager;
 import com.aeginning.adskip.engine.TextMatcher;
 import com.aeginning.adskip.engine.SkipWordLibrary;
+import com.aeginning.adskip.engine.AppScanPolicy;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -308,6 +309,27 @@ public final class MainActivity extends Activity {
         TextView appHint = label("仅对你明确勾选的桌面应用启用识别与安全点击。默认不对其他应用自动操作。", 12, 0xFF7A8495, false);
         addGap(appCard, 5);
         appCard.addView(appHint);
+        android.widget.Switch userLaunchOnlySwitch = new android.widget.Switch(this);
+        userLaunchOnlySwitch.setText("仅扫描用户主动启动的应用（专用模式）");
+        userLaunchOnlySwitch.setTextSize(14);
+        userLaunchOnlySwitch.setTextColor(0xFF344054);
+        userLaunchOnlySwitch.setPadding(0, dp(8), 0, dp(4));
+        userLaunchOnlySwitch.setChecked(getSharedPreferences("adskip_settings", MODE_PRIVATE)
+                .getBoolean("user_launch_only_mode_enabled", false));
+        userLaunchOnlySwitch.setOnCheckedChangeListener((buttonView, checked) -> {
+            getSharedPreferences("adskip_settings", MODE_PRIVATE).edit()
+                    .putBoolean("user_launch_only_mode_enabled", checked).apply();
+            Toast.makeText(this, checked
+                    ? "用户启动专用模式已开启。请返回桌面，从桌面或应用抽屉重新点击目标 App 图标；通知、后台或深链拉起的应用不会扫描。"
+                    : "用户启动专用模式已关闭；恢复对已勾选且处于前台的第三方应用识别。",
+                    Toast.LENGTH_LONG).show();
+        });
+        appCard.addView(userLaunchOnlySwitch);
+        TextView userLaunchOnlyHint = label(
+                "默认关闭。开启后只对你从桌面/应用抽屉明确点击启动、且已在上方勾选的应用进行识别；系统应用、后台应用、自动启动、通知跳转和无法确认来源的应用均不扫描。必须保持目标应用在前台；开启后建议重新从桌面点开应用。",
+                11, 0xFF7A8495, false);
+        addGap(appCard, 3);
+        appCard.addView(userLaunchOnlyHint);
         appRuleStatus = label("尚未选择应用。默认不对任何第三方 App 自动点击。", 13, 0xFF475467, false);
         appRuleStatus.setLineSpacing(dp(3), 1.0f);
         addGap(appCard, 11);
@@ -740,7 +762,12 @@ public final class MainActivity extends Activity {
 
     private void showChangelogDialog() {
         String changelog =
-                "AdSkip " + getAppVersionName() + " · OCR 热区优先与全屏兜底\n\n"
+                "AdSkip " + getAppVersionName() + " · 系统应用排除与用户启动专用模式\n\n"
+                + "• Shizuku / ADB 前台探测、无障碍事件、开屏探测、倒计时重扫、OCR 与点击复核统一排除系统应用和已更新系统应用；包信息无法读取时按未知包安全排除。\n"
+                + "• 新增默认关闭的“仅扫描用户主动启动的应用”专用模式：通过桌面/应用抽屉图标点击记录用户启动意图，只允许匹配到的已启用目标应用进入扫描许可集合。\n"
+                + "• 专用模式只处理当前前台窗口；后台应用、自动启动、通知/深链拉起和来源不明确的应用不会触发识别。开启后建议从桌面重新点击目标应用图标。\n"
+                + "• 模式切换会使旧窗口代次失效并清空待处理 OCR、倒计时重扫与二次确认任务；所有既有安全策略和其他功能保留。\n\n"
+                + "AdSkip 1.4.4 · OCR 热区优先与全屏兜底\n\n"
                 + "• 广告上下文和开屏探测优先识别右上角高概率跳过区域，缩小首轮 OCR 图像范围，减少常见 Skip / X / 关闭按钮的首轮识别负担。\n"
                 + "• 右上角区域未发现达到安全门槛的候选时，自动使用同一帧完整截图和完整语言模型顺序兜底，不限制按钮必须位于右上角。\n"
                 + "• 区域识别坐标映射回原截图坐标；控件置信度、危险操作硬拦截、敏感输入避让、二次确认、窗口代次校验和点击后验证全部保留。\n"
@@ -846,18 +873,33 @@ public final class MainActivity extends Activity {
                     if (which == 0) runPrivilegeQuery("已安装第三方应用", service ->
                             PrivilegeUtils.sanitizePackageList(service.listThirdPartyPackages(), 300));
                     else if (which == 1) runForegroundDiagnostic();
-                    else if (which == 2) promptPackageName("查询应用包元数据", pkg ->
-                            runPrivilegeQuery("应用包元数据：" + pkg, service -> service.getPackageInfo(pkg)));
-                    else if (which == 3) promptPackageName("查询 AppOps（只读）", pkg ->
-                            runPrivilegeQuery("AppOps 状态：" + pkg, service -> service.getAppOps(pkg)));
+                    else if (which == 2) promptPackageName("查询应用包元数据", pkg -> {
+                        if (isSystemOrUnknownPackage(pkg)) {
+                            Toast.makeText(this, "系统应用或无法验证的包已排除。", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        runPrivilegeQuery("应用包元数据：" + pkg, service -> service.getPackageInfo(pkg));
+                    });
+                    else if (which == 3) promptPackageName("查询 AppOps（只读）", pkg -> {
+                        if (isSystemOrUnknownPackage(pkg)) {
+                            Toast.makeText(this, "系统应用或无法验证的包已排除。", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        runPrivilegeQuery("AppOps 状态：" + pkg, service -> service.getAppOps(pkg));
+                    });
                 }).show();
     }
 
     private void runForegroundDiagnostic() {
         runPrivilegeQuery("当前前台 Activity 诊断", service -> {
             String shell = service.getForegroundActivity();
+            String foregroundPackage = PrivilegeUtils.extractForegroundPackage(shell);
+            String shellResult = foregroundPackage.isEmpty() || isSystemOrUnknownPackage(foregroundPackage)
+                    ? "系统应用、桌面或无法验证的前台包已过滤；不会展示其 Activity 详情。"
+                    : shell;
             String local = getLastAccessibilityWindow();
-            return "【Shizuku / Shell dumpsys】\n" + shell + "\n\n【无障碍最近窗口事件】\n" + local;
+            return "【Shizuku / Shell dumpsys】\n" + shellResult
+                    + "\n\n【无障碍最近窗口事件】\n" + local;
         });
     }
 
@@ -867,6 +909,9 @@ public final class MainActivity extends Activity {
         String className = prefs.getString("foreground_last_class", "");
         long at = prefs.getLong("foreground_last_at", 0L);
         if (packageName.isEmpty() || at <= 0) return "暂无记录。请启用 AdSkip 无障碍服务后切换到目标应用。";
+        if (isSystemOrUnknownPackage(packageName)) {
+            return "最近窗口属于系统应用或无法验证的包，已按规则过滤。";
+        }
         long ageSeconds = Math.max(0L, (System.currentTimeMillis() - at) / 1000L);
         return "包名：" + packageName + "\nActivity：" + (className.isEmpty() ? "系统未提供" : className)
                 + "\n距上次窗口事件：" + ageSeconds + " 秒";
@@ -927,6 +972,17 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("关闭", null).show();
     }
 
+    private boolean isSystemOrUnknownPackage(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()) return true;
+        try {
+            android.content.pm.ApplicationInfo info =
+                    getPackageManager().getApplicationInfo(packageName, 0);
+            return info == null || AppScanPolicy.isSystemAppFlags(info.flags);
+        } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException failure) {
+            return true;
+        }
+    }
+
     private boolean isAccessibilityServiceEnabled() {
         try {
             int enabled = Settings.Secure.getInt(getContentResolver(),
@@ -960,7 +1016,9 @@ public final class MainActivity extends Activity {
         List<ResolveInfo> filtered = new ArrayList<>();
         Set<String> seenPackages = new HashSet<>();
         for (ResolveInfo info : activities) {
-            if (info.activityInfo == null || getPackageName().equals(info.activityInfo.packageName)) continue;
+            if (info.activityInfo == null || info.activityInfo.applicationInfo == null
+                    || getPackageName().equals(info.activityInfo.packageName)
+                    || AppScanPolicy.isSystemAppFlags(info.activityInfo.applicationInfo.flags)) continue;
             if (seenPackages.add(info.activityInfo.packageName)) filtered.add(info);
         }
 
