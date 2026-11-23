@@ -175,7 +175,8 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
                 && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
-                && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return;
+                && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED
+                && type != AccessibilityEvent.TYPE_VIEW_CLICKED) return;
 
         String previousSplashProbePackage = splashProbePackage;
         int previousSplashProbeAttempts = splashProbeAttempts;
@@ -208,6 +209,21 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                     "事件未提供包名，已从当前活动无障碍窗口安全恢复目标；仍需通过应用启用状态和窗口一致性检查");
         }
 
+        // Launcher clicks are used only as a user-intent signal. The launcher UI itself
+        // is never scanned for ad controls.
+        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            if (isUserLaunchOnlyModeEnabled() && isHomePackage(pkg)) {
+                String clickedLabel = readLauncherClickLabel(event.getSource());
+                if (!clickedLabel.isEmpty()) {
+                    userLaunchTracker.recordLauncherClick(clickedLabel, SystemClock.elapsedRealtime());
+                    logDiagnostic(pkg, "USER_LAUNCH_INTENT_RECORDED",
+                            "已记录桌面/应用抽屉图标点击；等待短时间内匹配目标应用前台包名");
+                }
+            }
+            recycleNode(fallbackRoot);
+            return;
+        }
+
         boolean windowIdentityEvent = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED;
         if (windowIdentityEvent) {
@@ -232,6 +248,17 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             if (sessionChanged) {
                 logDiagnostic(pkg, "WINDOW_SESSION_CHANGED",
                         "检测到应用包名、窗口 ID 或 Activity 类变化；已使旧窗口候选失效");
+            }
+        }
+
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                && isUserLaunchOnlyModeEnabled()
+                && !pkg.equals(getPackageName())
+                && !isHomePackage(pkg) && !isSystemPackage(pkg)) {
+            String appLabel = getApplicationLabelForPackage(pkg);
+            if (userLaunchTracker.onForegroundPackage(pkg, appLabel, SystemClock.elapsedRealtime())) {
+                logDiagnostic(pkg, "USER_LAUNCH_ACCEPTED",
+                        "前台应用与最近一次桌面图标点击标签匹配；当前应用已加入用户启动许可集合");
             }
         }
 
@@ -264,6 +291,12 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
             recycleNode(fallbackRoot);
             return;
         }
+        if (isHomePackage(pkg) || isSystemPackage(pkg)) {
+            logDiagnostic(pkg, "SYSTEM_APP_EXCLUDED",
+                    "桌面/系统应用已排除；不会扫描其控件树、OCR 或安排前台重扫");
+            recycleNode(fallbackRoot);
+            return;
+        }
         if (!database.isAppEnabled(pkg)) {
             recycleNode(fallbackRoot);
             if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
@@ -271,6 +304,15 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
                 logDiagnostic("", "APP_NOT_ENABLED",
                         "当前前台应用尚未在应用自动化中启用；请在应用自动化中勾选并保存后重试。为保护隐私不扫描页面");
             }
+            return;
+        }
+        if (isUserLaunchOnlyModeEnabled() && !userLaunchTracker.isUserLaunched(pkg)) {
+            if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                    || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+                logDiagnostic(pkg, "USER_LAUNCH_REQUIRED",
+                        "用户启动专用模式已开启；当前应用没有匹配到桌面/应用抽屉图标点击记录，跳过扫描");
+            }
+            recycleNode(fallbackRoot);
             return;
         }
 
