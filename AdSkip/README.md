@@ -1,12 +1,5 @@
 # AdSkip 智能跳广告助手
 
-版本：**1.4.0**（极限识别与 UI 重构）
-包名：`com.aeginning.adskip`
-技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
-最低系统：Android 8.0（API 26）
-
-# AdSkip 智能跳广告助手
-
 版本：**1.4.1**（Shizuku 前台探测与状态稳定性修复）
 包名：`com.aeginning.adskip`
 技术：Java 17 / Android SDK 36 / Gradle 8.11.1 / Android Gradle Plugin 8.9.1 / Shizuku API 13.1.5
@@ -21,7 +14,6 @@
 - 保留 1.4.0 风险加速参数、Shizuku 身份验证、前台窗口一致性、应用白名单、敏感区域保护和危险操作拦截。
 
 ## 1.4.0 极限识别与 UI 重构
-
 
 - 新增可选“风险模式”：无障碍事件扫描约 45ms、广告 OCR 触发间隔约 110ms、倒计时重扫约 60ms、开屏首次探测约 55ms，并把 Shizuku 前台观察周期缩短至约 300ms；所有探测仍有界，不启动无限任务。
 - 新增 Shizuku top-resumed 前台应用监测：仅在用户已授权且 Shell/Root 身份校验通过时，读取系统当前 resumed Activity；只有包名属于用户启用列表、且和实时无障碍活动窗口完全一致时才启动快速探测。Shizuku 不可用时自动回退普通无障碍模式。
