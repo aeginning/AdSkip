@@ -20,6 +20,37 @@ public class AdConfidenceScorerTest {
         assertTrue(withContext.score >= 75);
     }
 
+    @Test public void genericSkipWithoutAdContextNeedsExactExtremeTopRightLayoutFallback() {
+        assertEquals(0, AdConfidenceScorer.assess(
+                "跳过", "Settings and account", true, true, true,
+                238, 103, 1080, 2400, false, 60).score);
+
+        AdConfidenceScorer.Assessment layout = AdConfidenceScorer.assess(
+                "跳过", "Settings and account", true, true, true,
+                238, 103, 1080, 2400, false, 60,
+                java.util.Collections.emptyList(), true);
+        assertEquals(69, layout.score);
+        assertEquals(AdConfidenceScorer.Level.LOW, layout.level);
+    }
+
+    @Test public void adContextUsesNormalGenericSkipScoreEvenWithFallbackFlag() {
+        AdConfidenceScorer.Assessment result = AdConfidenceScorer.assess(
+                "跳过", "正在播放广告", true, true, true,
+                238, 103, 1080, 2400, false, 60,
+                java.util.Collections.emptyList(), true);
+        assertEquals(78, result.score);
+        assertEquals(AdConfidenceScorer.Level.REVIEW, result.level);
+    }
+
+    @Test public void layoutFallbackDoesNotAcceptSentencesOrOtherLabels() {
+        assertEquals(0, AdConfidenceScorer.assess(
+                "立即跳过", "Settings", true, true, true, 238, 103, 1080, 2400,
+                false, 60, java.util.Collections.emptyList(), true).score);
+        assertEquals(0, AdConfidenceScorer.assess(
+                "Skip", "Settings", true, true, true, 238, 103, 1080, 2400,
+                false, 75, java.util.Collections.emptyList(), true).score);
+    }
+
     @Test public void negatedSkipTextNeverGetsConfidence() {
         assertEquals(0, AdConfidenceScorer.assess(
                 "Don't skip this ad", "Sponsored video", true, true, true, 90, 36, 1080, 2400).score);

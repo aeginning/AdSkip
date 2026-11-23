@@ -38,6 +38,16 @@ public final class SafetyPolicy {
                                        String candidateText, String surroundingText,
                                        boolean allowCountdownSkip, int minimumScore,
                                        List<String> customSkipWords) {
+        return isSafeTarget(bounds, screenWidth, screenHeight, clickable, enabled, visible,
+                candidateText, surroundingText, allowCountdownSkip, minimumScore,
+                customSkipWords, false);
+    }
+
+    public static boolean isSafeTarget(Rect bounds, int screenWidth, int screenHeight,
+                                       boolean clickable, boolean enabled, boolean visible,
+                                       String candidateText, String surroundingText,
+                                       boolean allowCountdownSkip, int minimumScore,
+                                       List<String> customSkipWords, boolean allowTopRightSkipFallback) {
         if (bounds == null || screenWidth <= 0 || screenHeight <= 0) return false;
         if (bounds.isEmpty() || bounds.left < 0 || bounds.top < 0
                 || bounds.right > screenWidth || bounds.bottom > screenHeight) return false;
@@ -58,6 +68,12 @@ public final class SafetyPolicy {
                 && bounds.bottom <= screenHeight * 0.12f;
         // Allow common OEM/ad-SDK close-button layouts beyond the very narrow
         // top-right corner, while retaining a strict ad-context and upper-right gate.
+        boolean topRightSkipPill = allowTopRightSkipFallback
+                && !adContext
+                && TextMatcher.isGenericSkipLabel(candidateText)
+                && SkipLayoutPolicy.isTopRightSkipPill(
+                        bounds.left, bounds.top, bounds.right, bounds.bottom,
+                        screenWidth, screenHeight);
         boolean topRightCloseGlyph = TextMatcher.isCloseGlyph(candidateText)
                 && adContext
                 && bounds.left >= screenWidth * 0.55f
@@ -69,7 +85,7 @@ public final class SafetyPolicy {
                 && bounds.width() <= screenWidth * 0.22f
                 && bounds.height() <= screenHeight * 0.16f;
         if ((bounds.top < screenHeight * 0.025f
-                    && !topRightCountdownControl && !topRightCloseGlyph)
+                    && !topRightCountdownControl && !topRightCloseGlyph && !topRightSkipPill)
                 || bounds.bottom > screenHeight * 0.96f) return false;
         // A lone X is accepted only as a small, top-right ad close affordance.
         if (TextMatcher.isCloseGlyph(candidateText) && !topRightCloseGlyph) return false;
@@ -77,7 +93,7 @@ public final class SafetyPolicy {
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                 candidateText, surroundingText, clickable, enabled, visible,
                 bounds.width(), bounds.height(), screenWidth, screenHeight,
-                allowCountdownSkip, minimumScore, customSkipWords);
+                allowCountdownSkip, minimumScore, customSkipWords, topRightSkipPill);
         return assessment.score >= Math.max(50, Math.min(95, minimumScore))
                 && !TextMatcher.isDangerous(candidateText)
                 && !TextMatcher.hasCriticalActionContext(surroundingText);

@@ -14,6 +14,13 @@ public class ExtremeSkipPolicyTest {
                 < ExtremeSkipPolicy.confirmationDelayMs(false));
     }
 
+    @Test public void extremeModeUsesSub100msEventAndRescanIntervals() {
+        assertEquals(70L, ExtremeSkipPolicy.eventIntervalMs(true));
+        assertEquals(170L, ExtremeSkipPolicy.adOcrIntervalMs(true));
+        assertEquals(90L, ExtremeSkipPolicy.countdownRescanIntervalMs(true));
+        assertEquals(60L, ExtremeSkipPolicy.confirmationDelayMs(true));
+    }
+
     @Test public void extremeModeHasABoundedCountdownBudget() {
         assertEquals(48, ExtremeSkipPolicy.maxCountdownRescans(false));
         assertEquals(96, ExtremeSkipPolicy.maxCountdownRescans(true));

@@ -364,7 +364,7 @@ public final class MainActivity extends Activity {
         addGap(recognitionCard, 6);
         recognitionCard.addView(extremeModeSwitch);
         TextView extremeModeHint = label(
-                "极速模式会将扫描间隔缩短至约 120ms、广告 OCR 节流缩短至约 320ms、倒计时重扫缩短至约 180ms，并把最低识别分数设为 60。仅对已勾选应用生效；仍保留高风险操作拦截、敏感输入排除、窗口校验、点击冷却和现有二次确认设置。耗电、发热和误匹配概率都会上升。",
+                "极速响应：事件扫描约 70ms、广告 OCR 节流约 170ms、无广告上下文视觉探测约 450ms、倒计时重扫约 90ms、确认等待约 60ms；开屏首轮约 100ms、后续约 160ms，最多 24 轮。最低识别分数为 60。仅对已勾选应用生效。精确“跳过”短词只有在右上角胶囊尺寸/位置吻合时才可无广告文字兜底，并强制二次观察；仍保留高风险词、敏感输入、窗口与点击冷却检查。耗电和发热会增加。",
                 11, 0xFF7A8495, false);
         extremeModeHint.setLineSpacing(dp(3), 1.0f);
         addGap(recognitionCard, 2);

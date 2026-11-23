@@ -42,9 +42,9 @@ public class SplashProbePolicyTest {
     }
 
     @Test public void extremeProbeScheduleIsFasterButStillBounded() {
-        assertEquals(220L, SplashProbePolicy.delayForAttempt(0, true));
-        assertEquals(320L, SplashProbePolicy.delayForAttempt(1, true));
-        assertEquals(320L, SplashProbePolicy.ocrIntervalMs(true));
+        assertEquals(100L, SplashProbePolicy.delayForAttempt(0, true));
+        assertEquals(160L, SplashProbePolicy.delayForAttempt(1, true));
+        assertEquals(160L, SplashProbePolicy.ocrIntervalMs(true));
         assertEquals(1_050L, SplashProbePolicy.ocrIntervalMs(false));
         assertTrue(SplashProbePolicy.hasMoreAttempts(23, true));
         assertFalse(SplashProbePolicy.hasMoreAttempts(24, true));

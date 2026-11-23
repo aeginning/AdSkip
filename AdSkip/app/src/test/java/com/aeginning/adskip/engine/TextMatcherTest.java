@@ -184,6 +184,14 @@ public class TextMatcherTest {
                 96, 36, 1080, 2400, false, 60, custom).score);
     }
 
+    @Test public void genericSkipLayoutFallbackRequiresAnExactShortLabel() {
+        assertTrue(TextMatcher.isGenericSkipLabel("跳过"));
+        assertTrue(TextMatcher.isGenericSkipLabel("Ｓｋｉｐ"));
+        assertFalse(TextMatcher.isGenericSkipLabel("立即跳过"));
+        assertFalse(TextMatcher.isGenericSkipLabel("Skip Ad"));
+        assertFalse(TextMatcher.isGenericSkipLabel("跳过广告"));
+    }
+
     @Test public void normalizesFullWidthAndZeroWidthAdLabels() {
         assertTrue(TextMatcher.isCountdown("Ｓｋｉｐ ３"));
         assertTrue(TextMatcher.isCountdown("跳过\u200B 3"));
