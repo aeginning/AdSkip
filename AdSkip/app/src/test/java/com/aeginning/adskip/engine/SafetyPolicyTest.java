@@ -16,10 +16,14 @@ public class SafetyPolicyTest {
         AdConfidenceScorer.Assessment assessment = AdConfidenceScorer.assess(
                 "跳过广告", "正在播放广告", true, true, true,
                 100, 40, SCREEN_WIDTH, SCREEN_HEIGHT);
-        assertTrue(assessment.score >= 90);
+        assertEquals(100, assessment.score);
+        assertTrue(TextMatcher.hasAdContextNormalized(TextMatcher.normalize("正在播放广告")));
+        assertFalse(TextMatcher.isDangerousNormalized(TextMatcher.normalize("跳过广告")));
+        assertFalse(TextMatcher.hasCriticalActionContextNormalized(
+                TextMatcher.normalize("正在播放广告")));
 
         assertTrue(SafetyPolicy.isSafeTarget(
-                new Rect(760, 100, 900, 150), SCREEN_WIDTH, SCREEN_HEIGHT,
+                new Rect(760, 800, 900, 850), SCREEN_WIDTH, SCREEN_HEIGHT,
                 true, true, true, "跳过广告", "正在播放广告",
                 false, 75, Collections.emptyList(), false, assessment));
     }
