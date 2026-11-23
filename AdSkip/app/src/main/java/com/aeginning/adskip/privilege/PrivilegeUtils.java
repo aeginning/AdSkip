@@ -36,6 +36,25 @@ public final class PrivilegeUtils {
         return -1;
     }
 
+    /**
+     * Extract the top-resumed package from the read-only dumpsys Activity output.
+     * The parser accepts either a package name or an Activity component and
+     * rejects all other text rather than guessing from process history.
+     */
+    public static String extractForegroundPackage(String output) {
+        if (output == null) return "";
+        String trimmed = output.trim();
+        if (isValidPackageName(trimmed)) return trimmed;
+        java.util.regex.Matcher matcher = Pattern.compile(
+                "([A-Za-z][A-Za-z0-9_]*(?:\\\\.[A-Za-z][A-Za-z0-9_]*)+)/"
+                        + "(?:[A-Za-z0-9_.$]+)").matcher(trimmed);
+        while (matcher.find()) {
+            String candidate = matcher.group(1);
+            if (isValidPackageName(candidate)) return candidate;
+        }
+        return "";
+    }
+
     public static String sanitizePackageList(String output, int maxPackages) {
         if (output == null || output.isEmpty()) return "未读取到应用列表。";
         List<String> packages = new ArrayList<>();
