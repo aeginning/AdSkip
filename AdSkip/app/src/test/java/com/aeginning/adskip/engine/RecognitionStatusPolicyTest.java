@@ -16,4 +16,11 @@ public class RecognitionStatusPolicyTest {
         assertNull(RecognitionStatusPolicy.fromDiagnostic(null));
         assertNull(RecognitionStatusPolicy.fromDiagnostic("SOME_INTERNAL_EVENT"));
     }
+
+    @Test public void repeatedStateIsNotQueuedTwice() {
+        assertFalse(RecognitionStatusPolicy.shouldUpdate("正在扫描", "正在扫描"));
+        assertTrue(RecognitionStatusPolicy.shouldUpdate("正在扫描", "正在识别（OCR）"));
+        assertFalse(RecognitionStatusPolicy.shouldUpdate("", null));
+        assertFalse(RecognitionStatusPolicy.shouldUpdate("", "  "));
+    }
 }
