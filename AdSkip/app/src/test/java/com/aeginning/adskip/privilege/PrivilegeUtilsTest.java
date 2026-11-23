@@ -48,6 +48,12 @@ public class PrivilegeUtilsTest {
                         + "topResumedActivity=ActivityRecord{12 y u0 com.example.foreground/.HomeActivity}"));
     }
 
+    @Test public void topResumedActivityTakesPriorityOverOtherResumedActivities() {
+        assertEquals("com.example.top", PrivilegeUtils.extractTopResumedPackage(
+                "mResumedActivity: ActivityRecord{8 x u0 com.example.other/.OtherActivity}\\n"
+                        + "topResumedActivity=ActivityRecord{12 y u0 com.example.top/.HomeActivity}"));
+    }
+
     @Test public void foregroundPackageParserNeverGuessesFromArbitraryText() {
         assertEquals("", PrivilegeUtils.extractForegroundPackage(null));
         assertEquals("", PrivilegeUtils.extractForegroundPackage("no resumed activity"));
