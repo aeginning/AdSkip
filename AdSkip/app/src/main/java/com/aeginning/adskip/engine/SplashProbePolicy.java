@@ -11,9 +11,9 @@ public final class SplashProbePolicy {
     public static final long INITIAL_DELAY_MS = 650L;
     public static final long RETRY_DELAY_MS = 900L;
     public static final long OCR_INTERVAL_MS = 1_050L;
-    public static final long EXTREME_INITIAL_DELAY_MS = 220L;
-    public static final long EXTREME_RETRY_DELAY_MS = 320L;
-    public static final long EXTREME_OCR_INTERVAL_MS = 320L;
+    public static final long EXTREME_INITIAL_DELAY_MS = 100L;
+    public static final long EXTREME_RETRY_DELAY_MS = 160L;
+    public static final long EXTREME_OCR_INTERVAL_MS = 160L;
     public static final long RESUME_GAP_MS = 30_000L;
 
     private SplashProbePolicy() { }
