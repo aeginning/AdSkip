@@ -170,13 +170,16 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (destroyed || event == null || database == null) return;
-        refreshFloatingOverlay(false);
         int type = event.getEventType();
-        if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
-                && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
-                && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED
-                && type != AccessibilityEvent.TYPE_VIEW_CLICKED) return;
+        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            if (!isUserLaunchOnlyModeEnabled()) return;
+        } else {
+            if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                    && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                    && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
+                    && type != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return;
+            refreshFloatingOverlay(false);
+        }
 
         String previousSplashProbePackage = splashProbePackage;
         int previousSplashProbeAttempts = splashProbeAttempts;
@@ -1867,16 +1870,28 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
 
     private void refreshHomePackages() {
         homePackages.clear();
+        List<ResolveInfo> homes = new ArrayList<>();
         try {
-            List<ResolveInfo> homes = new ArrayList<>();
             getPackageManager().getHomeActivities(homes);
-            for (ResolveInfo resolveInfo : homes) {
-                if (resolveInfo != null && resolveInfo.activityInfo != null
-                        && resolveInfo.activityInfo.packageName != null) {
-                    homePackages.add(resolveInfo.activityInfo.packageName);
-                }
+        } catch (RuntimeException ignored) {
+            // Fall back to a targeted HOME intent query below.
+        }
+        if (homes.isEmpty()) {
+            try {
+                Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+                homeIntent.addCategory(Intent.CATEGORY_HOME);
+                homes = getPackageManager().queryIntentActivities(homeIntent, 0);
+            } catch (RuntimeException ignored) {
+                // If the launcher cannot be identified, user-launch mode stays fail-closed.
             }
-        } catch (RuntimeException failure) {
+        }
+        for (ResolveInfo resolveInfo : homes) {
+            if (resolveInfo != null && resolveInfo.activityInfo != null
+                    && resolveInfo.activityInfo.packageName != null) {
+                homePackages.add(resolveInfo.activityInfo.packageName);
+            }
+        }
+        if (homePackages.isEmpty()) {
             logDiagnostic("", "HOME_PACKAGE_DISCOVERY_FAILED",
                     "无法读取桌面应用包名；用户启动专用模式将按严格匹配失败关闭处理");
         }
