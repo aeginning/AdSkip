@@ -77,7 +77,7 @@ public final class MainActivity extends Activity {
             if (!activityDestroyed) updatePrivilegeStatus(status.toDisplayText());
         });
         privilegeManager.addListener(privilegeListener);
-        privilegeManager.start();
+        privilegeManager.acquire();
         buildUi();
     }
 
@@ -1329,7 +1329,10 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         activityDestroyed = true;
-        if (privilegeManager != null) privilegeManager.stop();
+        if (privilegeManager != null) {
+            privilegeManager.removeListener(privilegeListener);
+            privilegeManager.release();
+        }
         privilegeExecutor.shutdownNow();
         dnsFeedExecutor.shutdownNow();
         if (database != null) database.close();
