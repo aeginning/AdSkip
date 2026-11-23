@@ -1098,7 +1098,7 @@ public final class AdSkipAccessibilityService extends AccessibilityService {
         boolean appEnabled = database != null && database.isAppEnabled(packageName);
         if (!PrivilegeProbePolicy.shouldProbeForeground(
                 lastPrivilegedForegroundPackage, lastPrivilegedForegroundWasEnabled,
-                packageName, appEnabled, getPackageName())) {
+                packageName, appEnabled)) {
             return;
         }
         if (packageName.equals(getPackageName()) || database == null || !appEnabled) {
