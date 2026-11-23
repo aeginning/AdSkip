@@ -68,6 +68,7 @@ public final class PrivilegeManager {
     private final Context appContext;
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private boolean listenersRegistered;
+    private int clientCount;
     private boolean bindRequested;
     private IAdSkipShellService shellService;
     private int userServiceUid = -1;
@@ -139,6 +140,16 @@ public final class PrivilegeManager {
 
     public void removeListener(Listener listener) {
         if (listener != null) listeners.remove(listener);
+    }
+
+    public synchronized void acquire() {
+        clientCount++;
+        start();
+    }
+
+    public synchronized void release() {
+        if (clientCount > 0) clientCount--;
+        if (clientCount == 0) stop();
     }
 
     public synchronized void start() {
