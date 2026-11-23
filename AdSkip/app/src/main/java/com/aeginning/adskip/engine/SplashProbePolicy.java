@@ -23,7 +23,11 @@ public final class SplashProbePolicy {
     }
 
     public static boolean hasMoreAttempts(int completedAttempts, boolean extreme) {
-        return completedAttempts < (extreme ? EXTREME_MAX_ATTEMPTS : MAX_ATTEMPTS);
+        return hasMoreAttempts(completedAttempts, extreme, false);
+    }
+
+    public static boolean hasMoreAttempts(int completedAttempts, boolean extreme, boolean riskMode) {
+        return completedAttempts < (riskMode ? 32 : extreme ? EXTREME_MAX_ATTEMPTS : MAX_ATTEMPTS);
     }
 
     public static long delayForAttempt(int completedAttempts) {
@@ -31,13 +35,22 @@ public final class SplashProbePolicy {
     }
 
     public static long delayForAttempt(int completedAttempts, boolean extreme) {
+        return delayForAttempt(completedAttempts, extreme, false);
+    }
+
+    public static long delayForAttempt(int completedAttempts, boolean extreme, boolean riskMode) {
+        if (riskMode) return completedAttempts <= 0 ? 55L : 90L;
         if (extreme) return completedAttempts <= 0
                 ? EXTREME_INITIAL_DELAY_MS : EXTREME_RETRY_DELAY_MS;
         return completedAttempts <= 0 ? INITIAL_DELAY_MS : RETRY_DELAY_MS;
     }
 
     public static long ocrIntervalMs(boolean extreme) {
-        return extreme ? EXTREME_OCR_INTERVAL_MS : OCR_INTERVAL_MS;
+        return ocrIntervalMs(extreme, false);
+    }
+
+    public static long ocrIntervalMs(boolean extreme, boolean riskMode) {
+        return riskMode ? 100L : extreme ? EXTREME_OCR_INTERVAL_MS : OCR_INTERVAL_MS;
     }
 
     /**
