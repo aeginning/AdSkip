@@ -728,6 +728,18 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         return result;
     }
 
+    /** Returns retained DNS import diagnostics only, newest first. */
+    public synchronized List<String> getDnsImportLogs() {
+        List<String> result = new ArrayList<>();
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT package_name, matched_text, action, reason, created_at FROM action_logs "
+                        + "WHERE package_name=? OR action LIKE ? ORDER BY created_at DESC, id DESC",
+                new String[]{"DNS_IMPORT", "DNS_IMPORT%"})) {
+            while (c.moveToNext()) result.add(formatLogRow(c));
+        }
+        return result;
+    }
+
     /** Returns every log row currently retained in the local database, newest first. */
     public synchronized List<String> getAllLogs() {
         List<String> result = new ArrayList<>();
