@@ -37,7 +37,15 @@ import com.aeginning.adskip.service.DnsFeedManager;
 import com.aeginning.adskip.engine.TextMatcher;
 import com.aeginning.adskip.engine.SkipWordLibrary;
 import com.aeginning.adskip.engine.AppScanPolicy;
+import com.aeginning.adskip.engine.DomainRuleFileCodec;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -56,6 +64,8 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_VPN = 410;
     private static final int REQUEST_NOTIFICATIONS = 411;
     private static final int REQUEST_SUCCESS_NOTIFICATION_PERMISSION = 412;
+    private static final int REQUEST_DNS_IMPORT_FILE = 413;
+    private static final int REQUEST_DNS_EXPORT_FILE = 414;
     private CompoundButton successNotificationSwitch;
     private RuleDatabase database;
     private TextView serviceStatus;
@@ -620,6 +630,29 @@ public final class MainActivity extends Activity {
         domains.setOnClickListener(v -> showDomainRulesDialog());
 
         addGap(dnsCard, 8);
+        LinearLayout dnsFileActions = new LinearLayout(this);
+        dnsFileActions.setOrientation(LinearLayout.HORIZONTAL);
+        dnsFileActions.setGravity(Gravity.CENTER_VERTICAL);
+        dnsCard.addView(dnsFileActions, new LinearLayout.LayoutParams(-1, dp(48)));
+        Button importDnsRules = button("导入规则文件", 0xFFEAF2FF);
+        importDnsRules.setTextColor(0xFF175CD3);
+        dnsFileActions.addView(importDnsRules, new LinearLayout.LayoutParams(0, -1, 1f));
+        importDnsRules.setOnClickListener(v -> launchDnsImportPicker());
+        View dnsFileGap = new View(this);
+        dnsFileActions.addView(dnsFileGap, new LinearLayout.LayoutParams(dp(8), 1));
+        Button exportDnsRules = button("导出规则文件", 0xFFEAF2FF);
+        exportDnsRules.setTextColor(0xFF175CD3);
+        dnsFileActions.addView(exportDnsRules, new LinearLayout.LayoutParams(0, -1, 1f));
+        exportDnsRules.setOnClickListener(v -> launchDnsExportPicker());
+
+        TextView dnsFileHint = label(
+                "支持普通域名列表、Hosts 文件和 ||domain^ 规则。导入采用合并方式，只写入手工规则；不会覆盖现有规则或订阅。",
+                11, 0xFF7A8495, false);
+        dnsFileHint.setLineSpacing(dp(2), 1.0f);
+        addGap(dnsCard, 4);
+        dnsCard.addView(dnsFileHint);
+
+        addGap(dnsCard, 8);
         Button feedLibrary = button("广告 DNS 规则库 / 订阅管理", 0xFFF0F3F8);
         feedLibrary.setTextColor(0xFF344054);
         dnsCard.addView(feedLibrary, new LinearLayout.LayoutParams(-1, dp(48)));
@@ -1128,6 +1161,101 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
+    private void launchDnsImportPicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TITLE, "选择 DNS 域名规则文件");
+        try {
+            startActivityForResult(intent, REQUEST_DNS_IMPORT_FILE);
+        } catch (android.content.ActivityNotFoundException error) {
+            Toast.makeText(this, "未找到可用的文件选择器", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void launchDnsExportPicker() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TITLE, "AdSkip-DNS-手工规则.txt");
+        try {
+            startActivityForResult(intent, REQUEST_DNS_EXPORT_FILE);
+        } catch (android.content.ActivityNotFoundException error) {
+            Toast.makeText(this, "未找到可用的文件保存器", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void importDnsRulesFromUri(Uri uri) {
+        StringBuilder content = new StringBuilder();
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new java.io.IOException("无法打开所选文件");
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(input, StandardCharsets.UTF_8))) {
+                char[] buffer = new char[8192];
+                int read;
+                while ((read = reader.read(buffer)) != -1) {
+                    if (content.length() + read > DomainRuleFileCodec.MAX_IMPORT_CHARS) {
+                        throw new java.io.IOException("文件超过 5 MB 安全限制");
+                    }
+                    content.append(buffer, 0, read);
+                }
+            }
+        } catch (Exception error) {
+            Toast.makeText(this, "导入失败：" + safeFileError(error), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        DomainRuleFileCodec.ParseResult parsed = DomainRuleFileCodec.parse(content.toString());
+        if (parsed.domains.isEmpty()) {
+            Toast.makeText(this, parsed.invalidCount > 0
+                    ? "没有找到有效域名；无效行 " + parsed.invalidCount + " 条"
+                    : "文件中没有可导入的域名规则", Toast.LENGTH_LONG).show();
+            return;
+        }
+        RuleDatabase.DomainRuleMergeResult result = database.mergeDomainRules(parsed.domains);
+        if (!result.success) {
+            Toast.makeText(this,
+                    "导入未完成：规则数量超出上限或数据校验失败（错误 " + result.errorCount + " 条）。现有规则未被覆盖。",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        refreshStatus();
+        new AlertDialog.Builder(this)
+                .setTitle("DNS 规则导入完成")
+                .setMessage("文件有效域名：" + parsed.domains.size() + " 条\n"
+                        + "新增规则：" + result.addedCount + " 条\n"
+                        + "重复规则：" + (parsed.duplicateCount
+                        + Math.max(0, parsed.domains.size() - result.addedCount)) + " 条\n"
+                        + "无效行：" + parsed.invalidCount + " 条\n\n"
+                        + "采用合并导入；原有手工规则和 DNS 订阅均已保留。")
+                .setPositiveButton("知道了", null)
+                .show();
+    }
+
+    private void exportDnsRulesToUri(Uri uri) {
+        List<String> rules = database.getBlockedDomains();
+        String export = DomainRuleFileCodec.exportPlainText(rules);
+        try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+            if (output == null) throw new java.io.IOException("无法创建目标文件");
+            try (BufferedWriter writer = new BufferedWriter(
+                    new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
+                writer.write(export);
+                writer.flush();
+            }
+        } catch (Exception error) {
+            Toast.makeText(this, "导出失败：" + safeFileError(error), Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(this, "已导出 " + rules.size()
+                + " 条启用中的手工 DNS 规则；订阅规则单独管理", Toast.LENGTH_LONG).show();
+    }
+
+    private static String safeFileError(Exception error) {
+        String message = error.getMessage();
+        return message == null || message.trim().isEmpty()
+                ? error.getClass().getSimpleName() : message;
+    }
+
     private void showDomainRulesDialog() {
         EditText input = new EditText(this);
         input.setGravity(Gravity.TOP | Gravity.START);
@@ -1453,6 +1581,12 @@ public final class MainActivity extends Activity {
         if (requestCode == REQUEST_VPN) {
             if (resultCode == RESULT_OK) startDnsService();
             else Toast.makeText(this, "未授予 VPN 权限，DNS 过滤未启动", Toast.LENGTH_LONG).show();
+        } else if (resultCode == RESULT_OK && data != null && data.getData() != null
+                && requestCode == REQUEST_DNS_IMPORT_FILE) {
+            importDnsRulesFromUri(data.getData());
+        } else if (resultCode == RESULT_OK && data != null && data.getData() != null
+                && requestCode == REQUEST_DNS_EXPORT_FILE) {
+            exportDnsRulesToUri(data.getData());
         }
     }
 
