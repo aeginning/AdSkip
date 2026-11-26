@@ -1224,6 +1224,7 @@ public final class MainActivity extends Activity {
 
         DomainRuleFileCodec.ParseResult parsed = DomainRuleFileCodec.parse(content.toString());
         logDnsImportSummary(importName, parsed);
+        logDnsParseIssues(importName, parsed);
         if (parsed.invalidCount > 0 || parsed.unsupportedCount > 0) {
             logDnsImportFailure(importName, "DNS_IMPORT_PARTIAL_REJECT",
                     "无效行=" + parsed.invalidCount + "；不支持规则=" + parsed.unsupportedCount);
@@ -1336,6 +1337,36 @@ public final class MainActivity extends Activity {
         try { database.log("DNS_IMPORT", source, action, reason); } catch (RuntimeException ignored) { }
     }
 
+    private void logDnsParseIssues(String source, DomainRuleFileCodec.ParseResult parsed) {
+        for (DomainRuleFileCodec.ParseIssue issue : parsed.issues) {
+            database.log("DNS_IMPORT", source, "DNS_IMPORT_LINE_FAILURE",
+                    "行=" + issue.lineNumber + "；类型=" + issue.type + "；原因=" + issue.reason
+                            + "；片段=" + sanitizeDnsImportExcerpt(issue.rawLine));
+        }
+        if (parsed.issuesTruncated) {
+            database.log("DNS_IMPORT", source, "DNS_IMPORT_LINE_FAILURES_TRUNCATED",
+                    "逐行诊断详情最多保留 " + DomainRuleFileCodec.MAX_DIAGNOSTIC_ISSUES
+                            + " 条；解析器仍保留完整失败计数。");
+        }
+    }
+
+    private static String sanitizeDnsImportExcerpt(String raw) {
+        if (raw == null) return "";
+        String value = raw;
+        int scheme = value.indexOf("://");
+        if (scheme >= 0) {
+            int authorityStart = scheme + 3;
+            int slash = value.indexOf('/', authorityStart);
+            int at = value.indexOf('@', authorityStart);
+            if (at >= 0 && (slash < 0 || at < slash)) {
+                value = value.substring(0, authorityStart) + "[redacted]@" + value.substring(at + 1);
+            }
+        }
+        int query = value.indexOf('?');
+        if (query >= 0) value = value.substring(0, query) + "?[redacted]";
+        return value.length() > DomainRuleFileCodec.MAX_DIAGNOSTIC_LINE_CHARS
+                ? value.substring(0, DomainRuleFileCodec.MAX_DIAGNOSTIC_LINE_CHARS) : value;
+    }
     private void logDnsImportSummary(String source, DomainRuleFileCodec.ParseResult parsed) {
         database.log("DNS_IMPORT", source, "DNS_IMPORT_PARSE_SUMMARY",
                 "有效域名=" + parsed.domains.size() + "；无效行=" + parsed.invalidCount
