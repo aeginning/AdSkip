@@ -98,7 +98,7 @@ public class DomainRuleFileCodecTest {
 
     @Test public void parsesWildcardAndInternationalizedDomains() {
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
-                "*.ads.example.com\n广告.例子.中国\\n");
+                "*.ads.example.com\n广告.例子.中国\n");
         assertEquals(2, result.domains.size());
         assertTrue(result.domains.contains("ads.example.com"));
         assertTrue(result.domains.get(1).startsWith("xn--"));
