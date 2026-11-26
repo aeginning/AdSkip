@@ -1193,7 +1193,49 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /**
+     * DNS import diagnostics share the existing action_logs table so they are
+     * included in the existing recent/all-log views and one-tap copy operation.
+     * File contents and URI query parameters are deliberately not logged.
+     */
+    private String getDnsImportFileName(Uri uri) {
+        String fallback = uri == null ? "未知文件" : uri.getLastPathSegment();
+        if (fallback == null || fallback.trim().isEmpty()) fallback = "未知文件";
+        try (android.database.Cursor cursor = getContentResolver().query(
+                uri, new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+                null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int column = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (column >= 0) {
+                    String displayName = cursor.getString(column);
+                    if (displayName != null && !displayName.trim().isEmpty()) fallback = displayName.trim();
+                }
+            }
+        } catch (Exception ignored) {
+            // Provider metadata is optional; retain the URI path fallback.
+        }
+        return fallback.length() > 160 ? fallback.substring(0, 160) : fallback;
+    }
+
+    private void logDnsImportResult(String fileName, String action, String reason) {
+        try {
+            database.log("DNS_IMPORT", fileName, action, reason);
+        } catch (RuntimeException logError) {
+            android.util.Log.w("AdSkip", "Unable to persist DNS import diagnostic: " + action, logError);
+        }
+    }
+
+    private static int countDnsImportLines(String content) {
+        if (content == null || content.isEmpty()) return 0;
+        int lines = 1;
+        for (int i = 0; i < content.length(); i++) {
+            if (content.charAt(i) == '\n') lines++;
+        }
+        return lines;
+    }
+
     private void importDnsRulesFromUri(Uri uri) {
+        final String fileName = getDnsImportFileName(uri);
         StringBuilder content = new StringBuilder();
         try (InputStream input = getContentResolver().openInputStream(uri)) {
             if (input == null) throw new java.io.IOException("无法打开所选文件");
@@ -1209,30 +1251,74 @@ public final class MainActivity extends Activity {
                 }
             }
         } catch (Exception error) {
-            Toast.makeText(this, "导入失败：" + safeFileError(error), Toast.LENGTH_LONG).show();
+            String detail = safeFileError(error);
+            logDnsImportResult(fileName, "DNS_IMPORT_FILE_READ_FAILED",
+                    "阶段=文件读取；原因=" + detail);
+            Toast.makeText(this, "导入失败：" + detail, Toast.LENGTH_LONG).show();
             return;
         }
 
-        DomainRuleFileCodec.ParseResult parsed = DomainRuleFileCodec.parse(content.toString());
+        final int totalLines = countDnsImportLines(content.toString());
+        DomainRuleFileCodec.ParseResult parsed;
+        try {
+            parsed = DomainRuleFileCodec.parse(content.toString());
+        } catch (RuntimeException error) {
+            String detail = safeFileError(error);
+            logDnsImportResult(fileName, "DNS_IMPORT_PARSE_FAILED",
+                    "阶段=规则解析；总行数=" + totalLines + "；原因=" + detail);
+            Toast.makeText(this, "DNS 规则解析失败：" + detail, Toast.LENGTH_LONG).show();
+            return;
+        }
+
         if (parsed.domains.isEmpty()) {
+            String action = content.length() == 0
+                    ? "DNS_IMPORT_EMPTY_FILE" : "DNS_IMPORT_NO_VALID_RULES";
+            String reason = "阶段=规则解析；总行数=" + totalLines
+                    + "；有效域名=0；无效行=" + parsed.invalidCount
+                    + "；不支持规则=" + parsed.unsupportedCount
+                    + "；忽略行=" + parsed.ignoredLineCount
+                    + "；重复规则=" + parsed.duplicateCount;
+            logDnsImportResult(fileName, action, reason);
             Toast.makeText(this, parsed.invalidCount > 0
                     ? "没有找到有效域名；无效行 " + parsed.invalidCount + " 条"
                     : "文件中没有可导入的域名规则", Toast.LENGTH_LONG).show();
             return;
         }
+
         final RuleDatabase.DomainRuleMergeResult result;
         try {
             result = database.mergeDomainRules(parsed.domains);
         } catch (RuntimeException error) {
-            Toast.makeText(this, "写入 DNS 规则失败：" + safeFileError(error),
+            String detail = safeFileError(error);
+            logDnsImportResult(fileName, "DNS_IMPORT_DATABASE_FAILED",
+                    "阶段=数据库合并写入；文件有效域名=" + parsed.domains.size()
+                            + "；总行数=" + totalLines + "；原因=" + detail);
+            Toast.makeText(this, "写入 DNS 规则失败：" + detail,
                     Toast.LENGTH_LONG).show();
             return;
         }
         if (!result.success) {
+            String reason = "阶段=数据库合并校验；有效域名=" + parsed.domains.size()
+                    + "；数据库错误数=" + result.errorCount
+                    + "；总行数=" + totalLines + "；现有规则未覆盖";
+            logDnsImportResult(fileName, "DNS_IMPORT_TRANSACTION_FAILED", reason);
             Toast.makeText(this,
                     "导入未完成：规则数量超出上限或数据校验失败（错误 " + result.errorCount + " 条）。现有规则未被覆盖。",
                     Toast.LENGTH_LONG).show();
             return;
+        }
+
+        // A file may import valid entries while still containing rejected lines.
+        // Preserve the successful import and record the partial failure separately.
+        if (parsed.invalidCount > 0 || parsed.unsupportedCount > 0) {
+            logDnsImportResult(fileName, "DNS_IMPORT_PARTIAL_FAILURE",
+                    "阶段=规则解析；总行数=" + totalLines
+                            + "；解析有效域名=" + parsed.domains.size()
+                            + "；新增规则=" + result.addedCount
+                            + "；无效行=" + parsed.invalidCount
+                            + "；不支持规则=" + parsed.unsupportedCount
+                            + "；重复规则=" + parsed.duplicateCount
+                            + "；忽略行=" + parsed.ignoredLineCount);
         }
         refreshStatus();
         new AlertDialog.Builder(this)
