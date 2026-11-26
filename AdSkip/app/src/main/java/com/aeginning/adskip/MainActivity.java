@@ -1311,12 +1311,12 @@ public final class MainActivity extends Activity {
             if (output == null) throw new java.io.IOException("无法创建目标文件");
             try (BufferedWriter writer = new BufferedWriter(
                     new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
-                writer.write("AdSkip DNS 导入诊断报告\\n");
+                writer.write("AdSkip DNS 导入诊断报告\n");
                 writer.write("导出时间：" + android.text.format.DateFormat.format(
-                        "yyyy-MM-dd HH:mm:ss", System.currentTimeMillis()) + "\\n");
-                writer.write("仅包含本地 DNS 导入诊断记录，不包含规则文件全文。\\n\\n");
+                        "yyyy-MM-dd HH:mm:ss", System.currentTimeMillis()) + "\n");
+                writer.write("仅包含本地 DNS 导入诊断记录，不包含规则文件全文。\n\n");
                 List<String> logs = database.getDnsImportLogs();
-                for (String line : logs) { writer.write(line); writer.write("\\n"); }
+                for (String line : logs) { writer.write(line); writer.write("\n"); }
                 writer.flush();
             }
             Toast.makeText(this, "诊断报告已导出", Toast.LENGTH_LONG).show();
@@ -1398,7 +1398,7 @@ public final class MainActivity extends Activity {
                 .create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(view -> {
-                    String[] lines = input.getText().toString().split("[\\r\\n,;]+", -1);
+                    String[] lines = input.getText().toString().split("[\\r\n,;]+", -1);
                     List<String> rules = new ArrayList<>();
                     for (String line : lines) if (!line.trim().isEmpty()) rules.add(line.trim());
 
