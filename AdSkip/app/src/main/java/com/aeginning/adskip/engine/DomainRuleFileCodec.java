@@ -98,7 +98,10 @@ public final class DomainRuleFileCodec {
             int end = line.indexOf('^', 2);
             if (end < 0) return result;
             String suffix = line.substring(end + 1);
-            if (!suffix.isEmpty() && !suffix.startsWith("$")) return result;
+            // Options such as $third-party or $domain=... change rule scope.
+            // Reject them instead of silently broadening a conditional filter into
+            // a global DNS block.
+            if (!suffix.isEmpty()) return result;
             String host = line.substring(2, end);
             if (!host.isEmpty()) result.add(host);
             return result;
