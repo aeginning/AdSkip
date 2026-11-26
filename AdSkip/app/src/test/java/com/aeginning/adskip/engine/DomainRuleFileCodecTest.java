@@ -64,6 +64,13 @@ public class DomainRuleFileCodecTest {
         assertFalse(output.contains("\nbad\n"));
     }
 
+    @Test public void oversizedSingleLineIsRejectedWithoutTokenizingIt() {
+        String oversizedLine = "a".repeat(DomainRuleFileCodec.MAX_LINE_CHARS + 1);
+        DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(oversizedLine);
+        assertTrue(result.domains.isEmpty());
+        assertEquals(1, result.invalidCount);
+    }
+
     @Test public void oversizedInputIsRejected() {
         String oversized = "a".repeat(DomainRuleFileCodec.MAX_IMPORT_CHARS + 1);
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(oversized);
