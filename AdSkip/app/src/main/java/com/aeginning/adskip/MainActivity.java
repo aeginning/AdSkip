@@ -66,6 +66,7 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_SUCCESS_NOTIFICATION_PERMISSION = 412;
     private static final int REQUEST_DNS_IMPORT_FILE = 413;
     private static final int REQUEST_DNS_EXPORT_FILE = 414;
+    private static final int REQUEST_DNS_IMPORT_REPORT_EXPORT = 415;
     private CompoundButton successNotificationSwitch;
     private RuleDatabase database;
     private TextView serviceStatus;
@@ -645,6 +646,12 @@ public final class MainActivity extends Activity {
         dnsFileActions.addView(exportDnsRules, new LinearLayout.LayoutParams(0, -1, 1f));
         exportDnsRules.setOnClickListener(v -> launchDnsExportPicker());
 
+        addGap(dnsCard, 7);
+        Button exportDnsImportReport = button("导出 DNS 导入诊断报告", 0xFFF0F3F8);
+        exportDnsImportReport.setTextColor(0xFF344054);
+        dnsCard.addView(exportDnsImportReport, new LinearLayout.LayoutParams(-1, dp(46)));
+        exportDnsImportReport.setOnClickListener(v -> launchDnsImportReportPicker());
+
         TextView dnsFileHint = label(
                 "支持普通域名列表、Hosts 文件和 ||domain^ 规则。导入采用合并方式，只写入手工规则；不会覆盖现有规则或订阅。",
                 11, 0xFF7A8495, false);
@@ -1193,6 +1200,18 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void launchDnsImportReportPicker() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TITLE, "AdSkip-DNS-导入诊断报告.txt");
+        try {
+            startActivityForResult(intent, REQUEST_DNS_IMPORT_REPORT_EXPORT);
+        } catch (android.content.ActivityNotFoundException error) {
+            Toast.makeText(this, "未找到可用的文件保存器", Toast.LENGTH_LONG).show();
+        }
+    }
+
     /**
      * DNS import diagnostics share the existing action_logs table so they are
      * included in the existing recent/all-log views and one-tap copy operation.
@@ -1222,6 +1241,33 @@ public final class MainActivity extends Activity {
             database.log("DNS_IMPORT", fileName, action, reason);
         } catch (RuntimeException logError) {
             android.util.Log.w("AdSkip", "Unable to persist DNS import diagnostic: " + action, logError);
+        }
+    }
+
+    private static String sanitizeDnsImportLine(String rawLine) {
+        if (rawLine == null) return "";
+        String safe = rawLine.replaceAll("(?i)(https?://)[^/@\\s]+@", "$1[redacted]@");
+        if (safe.contains("://")) {
+            int query = safe.indexOf('?');
+            if (query >= 0) safe = safe.substring(0, query) + "?[redacted]";
+        }
+        return safe.length() > DomainRuleFileCodec.MAX_DIAGNOSTIC_LINE_CHARS
+                ? safe.substring(0, DomainRuleFileCodec.MAX_DIAGNOSTIC_LINE_CHARS) + "…"
+                : safe;
+    }
+
+    private void logDnsParseIssues(String fileName, DomainRuleFileCodec.ParseResult parsed) {
+        for (DomainRuleFileCodec.ParseIssue issue : parsed.issues) {
+            logDnsImportResult(fileName, "DNS_IMPORT_LINE_FAILURE",
+                    "行号=" + issue.lineNumber + "；类型=" + issue.type
+                            + "；原因=" + issue.reason
+                            + "；错误片段=" + sanitizeDnsImportLine(issue.rawLine));
+        }
+        if (parsed.issuesTruncated) {
+            logDnsImportResult(fileName, "DNS_IMPORT_LINE_FAILURES_TRUNCATED",
+                    "逐行诊断最多保留 " + DomainRuleFileCodec.MAX_DIAGNOSTIC_ISSUES
+                            + " 条；无效行=" + parsed.invalidCount
+                            + "；不支持规则=" + parsed.unsupportedCount);
         }
     }
 
@@ -1269,6 +1315,8 @@ public final class MainActivity extends Activity {
             Toast.makeText(this, "DNS 规则解析失败：" + detail, Toast.LENGTH_LONG).show();
             return;
         }
+
+        logDnsParseIssues(fileName, parsed);
 
         if (parsed.domains.isEmpty()) {
             String action = content.length() == 0
@@ -1354,6 +1402,38 @@ public final class MainActivity extends Activity {
         }
         Toast.makeText(this, "已导出 " + rules.size()
                 + " 条启用中的 DNS 规则（包含已启用订阅）", Toast.LENGTH_LONG).show();
+    }
+
+    private void exportDnsImportReportToUri(Uri uri) {
+        try {
+            List<String> logs = database.getDnsImportLogs();
+            StringBuilder report = new StringBuilder();
+            report.append("AdSkip DNS 导入诊断报告\\n")
+                    .append("导出时间：")
+                    .append(android.text.format.DateFormat.format("yyyy-MM-dd HH:mm:ss",
+                            System.currentTimeMillis()))
+                    .append("\\n记录数量：").append(logs.size()).append("\\n\\n");
+            if (logs.isEmpty()) {
+                report.append("当前没有保留的 DNS 导入诊断记录。\\n");
+            } else {
+                for (String entry : logs) report.append(entry).append("\\n\\n");
+            }
+            try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+                if (output == null) throw new java.io.IOException("无法创建诊断报告文件");
+                try (BufferedWriter writer = new BufferedWriter(
+                        new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
+                    writer.write(report.toString());
+                    writer.flush();
+                }
+            }
+            Toast.makeText(this, "已导出 " + logs.size() + " 条 DNS 导入诊断记录",
+                    Toast.LENGTH_LONG).show();
+        } catch (Exception error) {
+            String detail = safeFileError(error);
+            logDnsImportResult("诊断报告", "DNS_IMPORT_REPORT_EXPORT_FAILED",
+                    "阶段=诊断报告导出；原因=" + detail);
+            Toast.makeText(this, "诊断报告导出失败：" + detail, Toast.LENGTH_LONG).show();
+        }
     }
 
     private static String safeFileError(Exception error) {
@@ -1693,6 +1773,9 @@ public final class MainActivity extends Activity {
         } else if (resultCode == RESULT_OK && data != null && data.getData() != null
                 && requestCode == REQUEST_DNS_EXPORT_FILE) {
             exportDnsRulesToUri(data.getData());
+        } else if (resultCode == RESULT_OK && data != null && data.getData() != null
+                && requestCode == REQUEST_DNS_IMPORT_REPORT_EXPORT) {
+            exportDnsImportReportToUri(data.getData());
         }
     }
 
