@@ -151,7 +151,7 @@ public final class DomainRuleFileCodec {
             int first = line.indexOf('/');
             int second = line.indexOf('/', first + 1);
             int third = line.indexOf('/', second + 1);
-            if (second > first && third > second) {
+            if (second > first && (third > second || line.startsWith("server=/") || line.startsWith("local=/"))) {
                 String host = line.substring(first + 1, second).trim();
                 if (!host.isEmpty()) result.add(stripWildcard(host));
             }
@@ -203,15 +203,15 @@ public final class DomainRuleFileCodec {
 
     public static String exportPlainText(List<String> domains) {
         StringBuilder output = new StringBuilder();
-        output.append("# AdSkip DNS domain rules\\n")
-                .append("# One hostname per line; enabled manual and subscription rules.\\n");
+        output.append("# AdSkip DNS domain rules\n")
+                .append("# One hostname per line; enabled manual and subscription rules.\n");
         if (domains != null) {
             Set<String> unique = new LinkedHashSet<>();
             for (String domain : domains) {
                 String normalized = DomainRuleValidator.normalize(domain);
                 if (!normalized.isEmpty()) unique.add(normalized);
             }
-            for (String domain : unique) output.append(domain).append('\\n');
+            for (String domain : unique) output.append(domain).append('\n');
         }
         return output.toString();
     }
