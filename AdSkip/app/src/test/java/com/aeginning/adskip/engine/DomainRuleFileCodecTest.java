@@ -89,16 +89,16 @@ public class DomainRuleFileCodecTest {
 
     @Test public void parsesDnsmasqAddressServerAndLocalRules() {
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
-                "address=/ads.example.com/0.0.0.0\\n"
-                        + "server=/tracker.example.net/\\n"
-                        + "local=/metrics.example.org/\\n");
+                "address=/ads.example.com/0.0.0.0\n"
+                        + "server=/tracker.example.net/\n"
+                        + "local=/metrics.example.org/\n");
         assertEquals(3, result.domains.size());
         assertEquals(0, result.invalidCount);
     }
 
     @Test public void parsesWildcardAndInternationalizedDomains() {
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
-                "*.ads.example.com\\n广告.例子.中国\\n");
+                "*.ads.example.com\n广告.例子.中国\\n");
         assertEquals(2, result.domains.size());
         assertTrue(result.domains.contains("ads.example.com"));
         assertTrue(result.domains.get(1).startsWith("xn--"));
@@ -106,9 +106,9 @@ public class DomainRuleFileCodecTest {
 
     @Test public void reportsConditionalExceptionsAndIgnoresCosmeticRules() {
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
-                "@@||allow.example.com^\\n"
-                        + "||conditional.example.com^$third-party\\n"
-                        + "example.com##.ad-banner\\n");
+                "@@||allow.example.com^\n"
+                        + "||conditional.example.com^$third-party\n"
+                        + "example.com##.ad-banner\n");
         assertEquals(0, result.domains.size());
         assertEquals(2, result.unsupportedCount);
         assertEquals(1, result.ignoredLineCount);
