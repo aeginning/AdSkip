@@ -39,7 +39,7 @@ public class DomainRuleFileCodecTest {
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
                 "||ads.example.com^$third-party\n");
         assertTrue(result.domains.isEmpty());
-        assertEquals(1, result.invalidCount);
+        assertEquals(1, result.unsupportedCount);
     }
 
     @Test public void deduplicatesAcrossInputFormats() {
@@ -53,14 +53,15 @@ public class DomainRuleFileCodecTest {
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
                 "https://ads.example.com/path\n192.0.2.10\n@@||allow.example.com^\n");
         assertTrue(result.domains.isEmpty());
-        assertEquals(3, result.invalidCount);
+        assertEquals(2, result.invalidCount);
+        assertEquals(1, result.unsupportedCount);
     }
 
     @Test public void exportsUtf8CompatiblePlainDomainListWithScopeHeader() {
         String output = DomainRuleFileCodec.exportPlainText(
                 java.util.Arrays.asList("Ads.Example.com", "bad", "tracker.example.net"));
         assertTrue(output.startsWith("# AdSkip DNS domain rules\n"));
-        assertTrue(output.contains("# Export contains enabled manual rules only"));
+        assertTrue(output.contains("# One hostname per line; enabled manual and subscription rules."));
         assertTrue(output.contains("\nads.example.com\n"));
         assertTrue(output.contains("tracker.example.net\n"));
         assertFalse(output.contains("\nbad\n"));
