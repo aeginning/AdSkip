@@ -66,6 +66,7 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_SUCCESS_NOTIFICATION_PERMISSION = 412;
     private static final int REQUEST_DNS_IMPORT_FILE = 413;
     private static final int REQUEST_DNS_EXPORT_FILE = 414;
+    private static final int REQUEST_DNS_IMPORT_REPORT_EXPORT = 415;
     private CompoundButton successNotificationSwitch;
     private RuleDatabase database;
     private TextView serviceStatus;
@@ -653,6 +654,12 @@ public final class MainActivity extends Activity {
         dnsCard.addView(dnsFileHint);
 
         addGap(dnsCard, 8);
+        Button dnsImportReport = button("导出 DNS 导入诊断报告", 0xFFF0F3F8);
+        dnsImportReport.setTextColor(0xFF344054);
+        dnsCard.addView(dnsImportReport, new LinearLayout.LayoutParams(-1, dp(44)));
+        dnsImportReport.setOnClickListener(v -> launchDnsImportReportPicker());
+
+        addGap(dnsCard, 8);
         Button feedLibrary = button("广告 DNS 规则库 / 订阅管理", 0xFFF0F3F8);
         feedLibrary.setTextColor(0xFF344054);
         dnsCard.addView(feedLibrary, new LinearLayout.LayoutParams(-1, dp(48)));
@@ -1194,6 +1201,7 @@ public final class MainActivity extends Activity {
     }
 
     private void importDnsRulesFromUri(Uri uri) {
+        String importName = safeImportSource(uri);
         StringBuilder content = new StringBuilder();
         try (InputStream input = getContentResolver().openInputStream(uri)) {
             if (input == null) throw new java.io.IOException("无法打开所选文件");
@@ -1209,12 +1217,21 @@ public final class MainActivity extends Activity {
                 }
             }
         } catch (Exception error) {
+            logDnsImportFailure(importName, "DNS_IMPORT_READ_FAILED", safeFileError(error));
             Toast.makeText(this, "导入失败：" + safeFileError(error), Toast.LENGTH_LONG).show();
             return;
         }
 
         DomainRuleFileCodec.ParseResult parsed = DomainRuleFileCodec.parse(content.toString());
+        logDnsImportSummary(importName, parsed);
+        if (parsed.invalidCount > 0 || parsed.unsupportedCount > 0) {
+            logDnsImportFailure(importName, "DNS_IMPORT_PARTIAL_REJECT",
+                    "无效行=" + parsed.invalidCount + "；不支持规则=" + parsed.unsupportedCount);
+        }
         if (parsed.domains.isEmpty()) {
+            logDnsImportFailure(importName, "DNS_IMPORT_NO_VALID_RULES",
+                    "有效域名=0；无效行=" + parsed.invalidCount + "；不支持规则=" + parsed.unsupportedCount
+                            + "；忽略行=" + parsed.ignoredLineCount);
             Toast.makeText(this, parsed.invalidCount > 0
                     ? "没有找到有效域名；无效行 " + parsed.invalidCount + " 条"
                     : "文件中没有可导入的域名规则", Toast.LENGTH_LONG).show();
@@ -1224,16 +1241,22 @@ public final class MainActivity extends Activity {
         try {
             result = database.mergeDomainRules(parsed.domains);
         } catch (RuntimeException error) {
+            logDnsImportFailure(importName, "DNS_IMPORT_DATABASE_FAILED", safeFileError(error));
             Toast.makeText(this, "写入 DNS 规则失败：" + safeFileError(error),
                     Toast.LENGTH_LONG).show();
             return;
         }
         if (!result.success) {
+            logDnsImportFailure(importName, "DNS_IMPORT_MERGE_REJECTED",
+                    "数据库合并失败；错误数=" + result.errorCount + "；现有规则未覆盖");
             Toast.makeText(this,
                     "导入未完成：规则数量超出上限或数据校验失败（错误 " + result.errorCount + " 条）。现有规则未被覆盖。",
                     Toast.LENGTH_LONG).show();
             return;
         }
+        database.log("DNS_IMPORT", importName, "DNS_IMPORT_SUCCESS",
+                "有效域名=" + parsed.domains.size() + "；新增=" + result.addedCount
+                        + "；无效=" + parsed.invalidCount + "；不支持=" + parsed.unsupportedCount);
         refreshStatus();
         new AlertDialog.Builder(this)
                 .setTitle("DNS 规则导入完成")
@@ -1268,6 +1291,56 @@ public final class MainActivity extends Activity {
         }
         Toast.makeText(this, "已导出 " + rules.size()
                 + " 条启用中的 DNS 规则（包含已启用订阅）", Toast.LENGTH_LONG).show();
+    }
+
+    private void launchDnsImportReportPicker() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TITLE, "AdSkip-DNS-导入诊断报告.txt");
+        try {
+            startActivityForResult(intent, REQUEST_DNS_IMPORT_REPORT_EXPORT);
+        } catch (android.content.ActivityNotFoundException error) {
+            Toast.makeText(this, "未找到可用的文件保存器", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void exportDnsImportReportToUri(Uri uri) {
+        try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+            if (output == null) throw new java.io.IOException("无法创建目标文件");
+            try (BufferedWriter writer = new BufferedWriter(
+                    new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
+                writer.write("AdSkip DNS 导入诊断报告\\n");
+                writer.write("导出时间：" + android.text.format.DateFormat.format(
+                        "yyyy-MM-dd HH:mm:ss", System.currentTimeMillis()) + "\\n");
+                writer.write("仅包含本地 DNS 导入诊断记录，不包含规则文件全文。\\n\\n");
+                List<String> logs = database.getDnsImportLogs();
+                for (String line : logs) { writer.write(line); writer.write("\\n"); }
+                writer.flush();
+            }
+            Toast.makeText(this, "诊断报告已导出", Toast.LENGTH_LONG).show();
+        } catch (Exception error) {
+            logDnsImportFailure("diagnostic-report", "DNS_IMPORT_REPORT_EXPORT_FAILED", safeFileError(error));
+            Toast.makeText(this, "诊断报告导出失败：" + safeFileError(error), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private String safeImportSource(Uri uri) {
+        if (uri == null) return "unknown-source";
+        String name = uri.getLastPathSegment();
+        if (name == null || name.trim().isEmpty()) name = "selected-file";
+        return name.length() > 120 ? name.substring(name.length() - 120) : name;
+    }
+
+    private void logDnsImportFailure(String source, String action, String reason) {
+        try { database.log("DNS_IMPORT", source, action, reason); } catch (RuntimeException ignored) { }
+    }
+
+    private void logDnsImportSummary(String source, DomainRuleFileCodec.ParseResult parsed) {
+        database.log("DNS_IMPORT", source, "DNS_IMPORT_PARSE_SUMMARY",
+                "有效域名=" + parsed.domains.size() + "；无效行=" + parsed.invalidCount
+                        + "；不支持规则=" + parsed.unsupportedCount + "；重复=" + parsed.duplicateCount
+                        + "；忽略=" + parsed.ignoredLineCount);
     }
 
     private static String safeFileError(Exception error) {
@@ -1607,6 +1680,9 @@ public final class MainActivity extends Activity {
         } else if (resultCode == RESULT_OK && data != null && data.getData() != null
                 && requestCode == REQUEST_DNS_EXPORT_FILE) {
             exportDnsRulesToUri(data.getData());
+        } else if (resultCode == RESULT_OK && data != null && data.getData() != null
+                && requestCode == REQUEST_DNS_IMPORT_REPORT_EXPORT) {
+            exportDnsImportReportToUri(data.getData());
         }
     }
 
