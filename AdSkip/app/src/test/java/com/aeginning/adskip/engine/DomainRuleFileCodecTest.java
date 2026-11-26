@@ -120,4 +120,26 @@ public class DomainRuleFileCodecTest {
         assertEquals(100_000, DomainRuleFileCodec.MAX_PARSED_DOMAINS);
     }
 
+    @Test public void recordsLineNumberTypeReasonAndSafeExcerptForRejectedLines() {
+        DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
+                "ads.example.com\\n@@||allow.example.com^\\nhttps://bad.example/path\\n||conditional.example.com^$third-party");
+        assertEquals(1, result.domains.size());
+        assertEquals(1, result.invalidCount);
+        assertEquals(2, result.unsupportedCount);
+        assertEquals(3, result.issues.size());
+        assertEquals(2, result.issues.get(0).lineNumber);
+        assertEquals("UNSUPPORTED", result.issues.get(0).type);
+        assertEquals(3, result.issues.get(1).lineNumber);
+        assertEquals("INVALID", result.issues.get(1).type);
+        assertTrue(result.issues.get(1).reason.length() > 0);
+    }
+
+    @Test public void capsStoredLineDiagnosticsButKeepsAccurateFailureCounts() {
+        StringBuilder input = new StringBuilder();
+        for (int i = 0; i < 107; i++) input.append("https://bad.example/path\\n");
+        DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(input.toString());
+        assertEquals(107, result.invalidCount);
+        assertEquals(DomainRuleFileCodec.MAX_DIAGNOSTIC_ISSUES, result.issues.size());
+        assertTrue(result.issuesTruncated);
+    }
 }
