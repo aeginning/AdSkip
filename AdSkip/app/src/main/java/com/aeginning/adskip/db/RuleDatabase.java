@@ -27,7 +27,7 @@ public final class RuleDatabase extends SQLiteOpenHelper {
     private static final long DOMAIN_CACHE_TTL_MS = 3_000L;
     private static final int DOMAIN_CACHE_MAX_ENTRIES = 2_048;
     private static final int MAX_SUBSCRIPTION_RULES = 120_000;
-    private static final int MAX_DOMAIN_RULES = 5_000;
+    private static final int MAX_DOMAIN_RULES = 100_000;
     private static final int MAX_LOG_ENTRIES = 2_000;
     private static final int LOG_TRIM_INTERVAL = 64;
     private static final Pattern PACKAGE_NAME =
@@ -545,7 +545,20 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         }
     }
 
-    /** Return only manually editable rules; large downloaded feeds are managed separately. */
+    /** Return enabled manual and subscribed DNS domains for complete portable export. */
+    public synchronized List<String> getAllEnabledDomainRules() {
+        List<String> result = new ArrayList<>();
+        String sql = "SELECT domain FROM domain_rules WHERE enabled=1 "
+                + "UNION SELECT r.domain FROM dns_subscription_rules r "
+                + "INNER JOIN dns_subscriptions s ON s.feed_id=r.feed_id WHERE s.enabled=1 "
+                + "ORDER BY domain ASC";
+        try (Cursor c = getReadableDatabase().rawQuery(sql, null)) {
+            while (c.moveToNext()) result.add(c.getString(0));
+        }
+        return result;
+    }
+
+    /** Return only manually editable rules for the local-rule management screen. */
     public synchronized List<String> getBlockedDomains() {
         List<String> result = new ArrayList<>();
         try (Cursor c = getReadableDatabase().query("domain_rules", new String[]{"domain"},
