@@ -1,4 +1,4 @@
-# AdSkip 1.4.6 — DNS domain rule import and export
+# AdSkip 1.4.7 — DNS import parser compatibility improvements
 
 Android intelligent ad-skip assistant.
 
@@ -10,13 +10,13 @@ To download the current source, use **Code → Download ZIP** on this repository
 
 ## Build in GitHub Actions
 
-The **Android CI** workflow runs JVM unit tests, Android Lint, and `:app:assembleDebug` with JDK 17, Gradle 8.11.1, and Android SDK 36. It uploads `AdSkip-1.4.6-debug-apk` and a separate test/Lint report artifact. Download the `AdSkip-1.4.6-debug-apk` artifact from a successful workflow run; test and lint reports are uploaded separately.
+The **Android CI** workflow runs JVM unit tests, Android Lint, and `:app:assembleDebug` with JDK 17, Gradle 8.11.1, and Android SDK 36. It uploads `AdSkip-1.4.7-debug-apk` and a separate test/Lint report artifact. Download the `AdSkip-1.4.7-debug-apk` artifact from a successful workflow run; test and lint reports are uploaded separately.
 
 ## Local build
 
 Open `AdSkip/` in Android Studio and build the `app` debug variant. The project uses Java 17, minSdk 26, and targetSdk 36.
 
-## 1.4.6 DNS domain rule import/export
+## 1.4.7 DNS domain rule import/export
 
 - Import TXT files containing one domain per line, hosts-file rows, or simple `||domain^` rules. Input is normalized and deduplicated.
 - Import merges into manual DNS rules transactionally; it never replaces existing rules, changes existing disabled entries, or deletes downloaded subscriptions.
