@@ -81,7 +81,7 @@ public class DomainRuleFileCodecTest {
         assertEquals(1, result.invalidCount);
     }
     @Test public void parsesAdguardAndUnconditionalImportantRules() {
-        DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
+                "||ads.example.com^\n||tracker.example.net^$important\n");
                 "||ads.example.com^\\n||tracker.example.net^$important\\n");
         assertEquals(2, result.domains.size());
         assertTrue(result.domains.contains("ads.example.com"));
