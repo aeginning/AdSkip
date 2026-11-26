@@ -17,7 +17,8 @@ public class DomainRuleFileCodecTest {
     @Test public void parsesHostsFileRowsAndIgnoresComments() {
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
                 "# block list\n127.0.0.1 ads.example.com tracker.example.net # local sink\n"
-                        + "0.0.0.0 metrics.example.org\n");
+                        + "0.0.0.0 metrics.example.org\n"
+                        + "0.0.0.1 telemetry.example.org\n");
         assertTrue(result.domains.contains("ads.example.com"));
         assertTrue(result.domains.contains("tracker.example.net"));
         assertTrue(result.domains.contains("metrics.example.org"));
