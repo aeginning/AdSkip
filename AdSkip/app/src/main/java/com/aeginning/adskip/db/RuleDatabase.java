@@ -444,6 +444,82 @@ public final class RuleDatabase extends SQLiteOpenHelper {
         return new DomainRuleReplaceResult(true, normalizedDomains.size(), 0);
     }
 
+    /**
+     * Merge imported manual DNS rules without deleting or changing existing rules.
+     * Disabled existing entries remain disabled; new entries are enabled.
+     */
+    public synchronized DomainRuleMergeResult mergeDomainRules(List<String> domains) {
+        if (domains == null) return new DomainRuleMergeResult(false, 0, 0, 1);
+        Set<String> normalizedDomains = new HashSet<>();
+        int invalidCount = 0;
+        for (String raw : domains) {
+            if (raw == null || raw.trim().isEmpty()) continue;
+            String domain = normalizeDomain(raw);
+            if (domain.isEmpty()) invalidCount++;
+            else normalizedDomains.add(domain);
+            if (normalizedDomains.size() > MAX_DOMAIN_RULES) {
+                return new DomainRuleMergeResult(false, 0, normalizedDomains.size(), invalidCount + 1);
+            }
+        }
+        if (invalidCount > 0) {
+            return new DomainRuleMergeResult(false, 0, normalizedDomains.size(), invalidCount);
+        }
+        if (normalizedDomains.isEmpty()) {
+            return new DomainRuleMergeResult(true, 0, 0, 0);
+        }
+
+        SQLiteDatabase db = getWritableDatabase();
+        int added = 0;
+        db.beginTransaction();
+        try {
+            int existingCount;
+            try (Cursor c = db.rawQuery("SELECT COUNT(*) FROM domain_rules", null)) {
+                existingCount = c.moveToFirst() ? c.getInt(0) : 0;
+            }
+            Set<String> existing = new HashSet<>();
+            try (Cursor c = db.query("domain_rules", new String[]{"domain"},
+                    null, null, null, null, null)) {
+                while (c.moveToNext()) existing.add(c.getString(0));
+            }
+            int newCount = 0;
+            for (String domain : normalizedDomains) {
+                if (!existing.contains(domain)) newCount++;
+            }
+            if (existingCount + newCount > MAX_DOMAIN_RULES) {
+                return new DomainRuleMergeResult(false, 0, normalizedDomains.size(),
+                        existingCount + newCount - MAX_DOMAIN_RULES);
+            }
+            for (String domain : normalizedDomains) {
+                if (existing.contains(domain)) continue;
+                ContentValues values = new ContentValues();
+                values.put("domain", domain);
+                values.put("enabled", 1);
+                long rowId = db.insertWithOnConflict(
+                        "domain_rules", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+                if (rowId != -1L) added++;
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+            if (added > 0) clearDomainLookupCache();
+        }
+        return new DomainRuleMergeResult(true, added, normalizedDomains.size(), 0);
+    }
+
+    public static final class DomainRuleMergeResult {
+        public final boolean success;
+        public final int addedCount;
+        public final int importedCount;
+        public final int errorCount;
+
+        DomainRuleMergeResult(boolean success, int addedCount, int importedCount, int errorCount) {
+            this.success = success;
+            this.addedCount = addedCount;
+            this.importedCount = importedCount;
+            this.errorCount = errorCount;
+        }
+    }
+
     /** Clear rules only after an explicit confirmation in the UI. */
     public synchronized void clearDomainRules() {
         SQLiteDatabase db = getWritableDatabase();
