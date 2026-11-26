@@ -21,6 +21,7 @@ public class DomainRuleFileCodecTest {
         assertTrue(result.domains.contains("ads.example.com"));
         assertTrue(result.domains.contains("tracker.example.net"));
         assertTrue(result.domains.contains("metrics.example.org"));
+        assertTrue(result.domains.contains("telemetry.example.org"));
         assertEquals(0, result.invalidCount);
         assertTrue(result.ignoredLineCount >= 1);
     }
