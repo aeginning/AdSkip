@@ -9,7 +9,7 @@ import java.util.Set;
  * Parser/exporter for portable DNS block domain lists.
  *
  * Accepted input: one hostname per line, hosts-file rows, and common Adblock
- * Network rules such as ||ads.example.com^ or ||ads.example.com^$third-party.
+ * Network rules such as ||ads.example.com^. Conditional rules with options are deliberately rejected.
  * URLs, IP addresses, allowlist rules, and arbitrary filter syntax are rejected.
  */
 public final class DomainRuleFileCodec {
