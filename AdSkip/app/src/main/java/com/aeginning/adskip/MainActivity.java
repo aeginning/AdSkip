@@ -1241,9 +1241,9 @@ public final class MainActivity extends Activity {
                         + "新增规则：" + result.addedCount + " 条\n"
                         + "重复规则：" + (parsed.duplicateCount
                         + Math.max(0, parsed.domains.size() - result.addedCount)) + " 条\n"
-                        + "无效行：" + parsed.invalidCount + " 条\\n"
-                        + "不支持的条件/例外规则：" + parsed.unsupportedCount + " 条\\n"
-                        + "忽略的注释/非 DNS 规则：" + parsed.ignoredLineCount + " 行\\n\\n"
+                        + "无效行：" + parsed.invalidCount + " 条\n"
+                        + "不支持的条件/例外规则：" + parsed.unsupportedCount + " 条\n"
+                        + "忽略的注释/非 DNS 规则：" + parsed.ignoredLineCount + " 行\n\\n"
                         + "采用合并导入；原有规则和订阅均已保留。")
                 .setPositiveButton("知道了", null)
                 .show();
