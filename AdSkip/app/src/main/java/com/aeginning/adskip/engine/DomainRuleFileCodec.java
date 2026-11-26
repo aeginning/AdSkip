@@ -17,19 +17,40 @@ public final class DomainRuleFileCodec {
     public static final int MAX_INPUT_LINES = 500_000;
     public static final int MAX_LINE_CHARS = 16_384;
     public static final int MAX_PARSED_DOMAINS = 100_000;
+    public static final int MAX_DIAGNOSTIC_ISSUES = 100;
+    public static final int MAX_DIAGNOSTIC_LINE_CHARS = 240;
 
     private DomainRuleFileCodec() { }
 
+    public static final class ParseIssue {
+        public final int lineNumber;
+        public final String type;
+        public final String reason;
+        public final String rawLine;
+
+        ParseIssue(int lineNumber, String type, String reason, String rawLine) {
+            this.lineNumber = lineNumber;
+            this.type = type;
+            this.reason = reason;
+            this.rawLine = rawLine;
+        }
+    }
+
     public static final class ParseResult {
         public final List<String> domains;
+        public final List<ParseIssue> issues;
+        public final boolean issuesTruncated;
         public final int invalidCount;
         public final int duplicateCount;
         public final int ignoredLineCount;
         public final int unsupportedCount;
 
         ParseResult(List<String> domains, int invalidCount, int duplicateCount,
-                    int ignoredLineCount, int unsupportedCount) {
+                    int ignoredLineCount, int unsupportedCount, List<ParseIssue> issues,
+                    boolean issuesTruncated) {
             this.domains = domains;
+            this.issues = issues;
+            this.issuesTruncated = issuesTruncated;
             this.invalidCount = invalidCount;
             this.duplicateCount = duplicateCount;
             this.ignoredLineCount = ignoredLineCount;
@@ -55,9 +76,15 @@ public final class DomainRuleFileCodec {
         int duplicates = 0;
         int ignored = 0;
         int unsupported = 0;
-        for (String original : lines) {
+        List<ParseIssue> issues = new ArrayList<>();
+        boolean[] issuesTruncated = {false};
+        for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            String original = lines[lineIndex];
+            int lineNumber = lineIndex + 1;
             if (original != null && original.length() > MAX_LINE_CHARS) {
                 invalid++;
+                addIssue(issues, issuesTruncated, lineNumber, "INVALID",
+                        "单行超过 " + MAX_LINE_CHARS + " 个字符", original);
                 continue;
             }
             String line = original == null ? "" : original.trim();
@@ -85,13 +112,22 @@ public final class DomainRuleFileCodec {
             if (line.startsWith("@@")) {
                 // Exception/allow rules cannot be represented by a DNS block entry.
                 unsupported++;
+                addIssue(issues, issuesTruncated, lineNumber, "UNSUPPORTED",
+                        "例外/白名单规则不能转换为 DNS 拦截规则", line);
                 continue;
             }
 
             List<String> candidates = extractCandidates(line);
             if (candidates.isEmpty()) {
-                if (looksLikeConditionalOrCosmeticRule(line)) unsupported++;
-                else invalid++;
+                if (looksLikeConditionalOrCosmeticRule(line)) {
+                    unsupported++;
+                    addIssue(issues, issuesTruncated, lineNumber, "UNSUPPORTED",
+                            "条件型或非 DNS 规则无法安全转换", line);
+                } else {
+                    invalid++;
+                    addIssue(issues, issuesTruncated, lineNumber, "INVALID",
+                            "未识别为有效域名或受支持的 DNS 规则格式", line);
+                }
                 continue;
             }
 
@@ -108,14 +144,33 @@ public final class DomainRuleFileCodec {
                             duplicates, ignored, unsupported);
                 }
             }
-            if (lineInvalid) invalid++;
+            if (lineInvalid) {
+                invalid++;
+                addIssue(issues, issuesTruncated, lineNumber, "INVALID",
+                        "规则中的一个或多个域名未通过域名校验", line);
+            }
         }
-        return result(domains, invalid, duplicates, ignored, unsupported);
+        return new ParseResult(new ArrayList<>(domains), invalid, duplicates, ignored,
+                unsupported, issues, issuesTruncated[0]);
     }
 
     private static ParseResult result(Set<String> domains, int invalid, int duplicates,
                                       int ignored, int unsupported) {
-        return new ParseResult(new ArrayList<>(domains), invalid, duplicates, ignored, unsupported);
+        return new ParseResult(new ArrayList<>(domains), invalid, duplicates, ignored,
+                unsupported, new ArrayList<>(), false);
+    }
+
+    private static void addIssue(List<ParseIssue> issues, boolean[] truncated,
+                                 int lineNumber, String type, String reason, String rawLine) {
+        if (issues.size() >= MAX_DIAGNOSTIC_ISSUES) {
+            truncated[0] = true;
+            return;
+        }
+        String excerpt = rawLine == null ? "" : rawLine;
+        if (excerpt.length() > MAX_DIAGNOSTIC_LINE_CHARS) {
+            excerpt = excerpt.substring(0, MAX_DIAGNOSTIC_LINE_CHARS) + "…";
+        }
+        issues.add(new ParseIssue(lineNumber, type, reason, excerpt));
     }
 
     private static boolean isNonDnsFilter(String line) {
