@@ -151,7 +151,7 @@ public final class DomainRuleFileCodec {
             int first = line.indexOf('/');
             int second = line.indexOf('/', first + 1);
             int third = line.indexOf('/', second + 1);
-            if (second > first && (third > second || line.startsWith("server=/") || line.startsWith("local=/"))) {
+            if (second > first && (third > second || line.startsWith("address=/") || line.startsWith("server=/") || line.startsWith("local=/"))) {
                 String host = line.substring(first + 1, second).trim();
                 if (!host.isEmpty()) result.add(stripWildcard(host));
             }
