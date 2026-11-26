@@ -15,6 +15,7 @@ import java.util.Set;
 public final class DomainRuleFileCodec {
     public static final int MAX_IMPORT_CHARS = 5 * 1024 * 1024;
     public static final int MAX_INPUT_LINES = 100_000;
+    public static final int MAX_LINE_CHARS = 4_096;
 
     private DomainRuleFileCodec() { }
 
@@ -51,6 +52,10 @@ public final class DomainRuleFileCodec {
         int duplicates = 0;
         int ignored = 0;
         for (String original : lines) {
+            if (original != null && original.length() > MAX_LINE_CHARS) {
+                invalid++;
+                continue;
+            }
             String line = original == null ? "" : original.trim();
             if (line.startsWith("\uFEFF")) line = line.substring(1).trim();
             if (line.isEmpty() || line.startsWith("#") || line.startsWith("!")) {
