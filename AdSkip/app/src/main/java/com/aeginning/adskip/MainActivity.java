@@ -1408,15 +1408,15 @@ public final class MainActivity extends Activity {
         try {
             List<String> logs = database.getDnsImportLogs();
             StringBuilder report = new StringBuilder();
-            report.append("AdSkip DNS 导入诊断报告\\n")
+            report.append("AdSkip DNS 导入诊断报告\n")
                     .append("导出时间：")
                     .append(android.text.format.DateFormat.format("yyyy-MM-dd HH:mm:ss",
                             System.currentTimeMillis()))
-                    .append("\\n记录数量：").append(logs.size()).append("\\n\\n");
+                    .append("\n记录数量：").append(logs.size()).append("\n\n");
             if (logs.isEmpty()) {
-                report.append("当前没有保留的 DNS 导入诊断记录。\\n");
+                report.append("当前没有保留的 DNS 导入诊断记录。\n");
             } else {
-                for (String entry : logs) report.append(entry).append("\\n\\n");
+                for (String entry : logs) report.append(entry).append("\n\n");
             }
             try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
                 if (output == null) throw new java.io.IOException("无法创建诊断报告文件");
