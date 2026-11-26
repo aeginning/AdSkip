@@ -1170,7 +1170,9 @@ public final class MainActivity extends Activity {
     private void launchDnsImportPicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("text/plain");
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                new String[]{"text/plain", "text/*", "application/octet-stream"});
         intent.putExtra(Intent.EXTRA_TITLE, "选择 DNS 域名规则文件");
         try {
             startActivityForResult(intent, REQUEST_DNS_IMPORT_FILE);
@@ -1218,7 +1220,14 @@ public final class MainActivity extends Activity {
                     : "文件中没有可导入的域名规则", Toast.LENGTH_LONG).show();
             return;
         }
-        RuleDatabase.DomainRuleMergeResult result = database.mergeDomainRules(parsed.domains);
+        final RuleDatabase.DomainRuleMergeResult result;
+        try {
+            result = database.mergeDomainRules(parsed.domains);
+        } catch (RuntimeException error) {
+            Toast.makeText(this, "写入 DNS 规则失败：" + safeFileError(error),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         if (!result.success) {
             Toast.makeText(this,
                     "导入未完成：规则数量超出上限或数据校验失败（错误 " + result.errorCount + " 条）。现有规则未被覆盖。",
@@ -1239,14 +1248,17 @@ public final class MainActivity extends Activity {
     }
 
     private void exportDnsRulesToUri(Uri uri) {
-        List<String> rules = database.getBlockedDomains();
-        String export = DomainRuleFileCodec.exportPlainText(rules);
-        try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
-            if (output == null) throw new java.io.IOException("无法创建目标文件");
-            try (BufferedWriter writer = new BufferedWriter(
-                    new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
-                writer.write(export);
-                writer.flush();
+        final List<String> rules;
+        try {
+            rules = database.getBlockedDomains();
+            String export = DomainRuleFileCodec.exportPlainText(rules);
+            try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
+                if (output == null) throw new java.io.IOException("无法创建目标文件");
+                try (BufferedWriter writer = new BufferedWriter(
+                        new OutputStreamWriter(output, StandardCharsets.UTF_8))) {
+                    writer.write(export);
+                    writer.flush();
+                }
             }
         } catch (Exception error) {
             Toast.makeText(this, "导出失败：" + safeFileError(error), Toast.LENGTH_LONG).show();
