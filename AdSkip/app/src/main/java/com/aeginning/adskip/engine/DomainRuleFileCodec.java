@@ -132,7 +132,20 @@ public final class DomainRuleFileCodec {
 
     private static boolean isHostsAddress(String value) {
         if (value == null) return false;
-        return value.matches("(?i)(?:0\\.0\\.0\\.0|127(?:\\.\\d{1,3}){3}|::1|::|0:0:0:0:0:0:0:1)");
+        if ("::".equals(value) || "::1".equals(value)
+                || "0:0:0:0:0:0:0:1".equalsIgnoreCase(value)) return true;
+        String[] octets = value.split("\\.", -1);
+        if (octets.length != 4) return false;
+        for (String octet : octets) {
+            if (octet.isEmpty() || octet.length() > 3) return false;
+            try {
+                int number = Integer.parseInt(octet);
+                if (number < 0 || number > 255) return false;
+            } catch (NumberFormatException invalid) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static String exportPlainText(List<String> domains) {
