@@ -39,7 +39,7 @@ public class DomainRuleFileCodecTest {
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
                 "||ads.example.com^$third-party\n");
         assertTrue(result.domains.isEmpty());
-        assertEquals(1, result.invalidCount);
+        assertEquals(1, result.unsupportedCount);
     }
 
     @Test public void deduplicatesAcrossInputFormats() {
@@ -53,14 +53,15 @@ public class DomainRuleFileCodecTest {
         DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
                 "https://ads.example.com/path\n192.0.2.10\n@@||allow.example.com^\n");
         assertTrue(result.domains.isEmpty());
-        assertEquals(3, result.invalidCount);
+        assertEquals(2, result.invalidCount);
+        assertEquals(1, result.unsupportedCount);
     }
 
     @Test public void exportsUtf8CompatiblePlainDomainListWithScopeHeader() {
         String output = DomainRuleFileCodec.exportPlainText(
                 java.util.Arrays.asList("Ads.Example.com", "bad", "tracker.example.net"));
         assertTrue(output.startsWith("# AdSkip DNS domain rules\n"));
-        assertTrue(output.contains("# Export contains enabled manual rules only"));
+        assertTrue(output.contains("# One hostname per line; enabled manual and subscription rules."));
         assertTrue(output.contains("\nads.example.com\n"));
         assertTrue(output.contains("tracker.example.net\n"));
         assertFalse(output.contains("\nbad\n"));
@@ -79,4 +80,44 @@ public class DomainRuleFileCodecTest {
         assertTrue(result.domains.isEmpty());
         assertEquals(1, result.invalidCount);
     }
+    @Test public void parsesAdguardAndUnconditionalImportantRules() {
+        DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
+                "||ads.example.com^\n||tracker.example.net^$important\n");
+        assertEquals(2, result.domains.size());
+        assertTrue(result.domains.contains("ads.example.com"));
+        assertTrue(result.domains.contains("tracker.example.net"));
+    }
+
+    @Test public void parsesDnsmasqAddressServerAndLocalRules() {
+        DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
+                "address=/ads.example.com/0.0.0.0\n"
+                        + "server=/tracker.example.net/\n"
+                        + "local=/metrics.example.org/\n");
+        assertEquals(3, result.domains.size());
+        assertEquals(0, result.invalidCount);
+    }
+
+    @Test public void parsesWildcardAndInternationalizedDomains() {
+        DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
+                "*.ads.example.com\n广告.例子.中国\n");
+        assertEquals(2, result.domains.size());
+        assertTrue(result.domains.contains("ads.example.com"));
+        assertTrue(result.domains.get(1).startsWith("xn--"));
+    }
+
+    @Test public void reportsConditionalExceptionsAndIgnoresCosmeticRules() {
+        DomainRuleFileCodec.ParseResult result = DomainRuleFileCodec.parse(
+                "@@||allow.example.com^\n"
+                        + "||conditional.example.com^$third-party\n"
+                        + "example.com##.ad-banner\n");
+        assertEquals(0, result.domains.size());
+        assertEquals(2, result.unsupportedCount);
+        assertTrue(result.ignoredLineCount >= 1);
+    }
+
+    @Test public void acceptsLargerImportCapacity() {
+        assertEquals(20 * 1024 * 1024, DomainRuleFileCodec.MAX_IMPORT_CHARS);
+        assertEquals(100_000, DomainRuleFileCodec.MAX_PARSED_DOMAINS);
+    }
+
 }

@@ -1203,7 +1203,7 @@ public final class MainActivity extends Activity {
                 int read;
                 while ((read = reader.read(buffer)) != -1) {
                     if (content.length() + read > DomainRuleFileCodec.MAX_IMPORT_CHARS) {
-                        throw new java.io.IOException("文件超过 5 MB 安全限制");
+                        throw new java.io.IOException("文件超过 20 MB 导入容量上限");
                     }
                     content.append(buffer, 0, read);
                 }
@@ -1241,8 +1241,10 @@ public final class MainActivity extends Activity {
                         + "新增规则：" + result.addedCount + " 条\n"
                         + "重复规则：" + (parsed.duplicateCount
                         + Math.max(0, parsed.domains.size() - result.addedCount)) + " 条\n"
-                        + "无效行：" + parsed.invalidCount + " 条\n\n"
-                        + "采用合并导入；原有手工规则和 DNS 订阅均已保留。")
+                        + "无效行：" + parsed.invalidCount + " 条\n"
+                        + "不支持的条件/例外规则：" + parsed.unsupportedCount + " 条\n"
+                        + "忽略的注释/非 DNS 规则：" + parsed.ignoredLineCount + " 行\n\n"
+                        + "采用合并导入；原有规则和订阅均已保留。")
                 .setPositiveButton("知道了", null)
                 .show();
     }
@@ -1250,7 +1252,7 @@ public final class MainActivity extends Activity {
     private void exportDnsRulesToUri(Uri uri) {
         final List<String> rules;
         try {
-            rules = database.getBlockedDomains();
+            rules = database.getAllEnabledDomainRules();
             String export = DomainRuleFileCodec.exportPlainText(rules);
             try (OutputStream output = getContentResolver().openOutputStream(uri, "wt")) {
                 if (output == null) throw new java.io.IOException("无法创建目标文件");
@@ -1265,7 +1267,7 @@ public final class MainActivity extends Activity {
             return;
         }
         Toast.makeText(this, "已导出 " + rules.size()
-                + " 条启用中的手工 DNS 规则；订阅规则单独管理", Toast.LENGTH_LONG).show();
+                + " 条启用中的 DNS 规则（包含已启用订阅）", Toast.LENGTH_LONG).show();
     }
 
     private static String safeFileError(Exception error) {
